@@ -1,30 +1,37 @@
 {
-  "name": "demo-live-preview",
+  "name": "demo-live-preview-hotwire",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint ."
+    "dev": "npm run build:assets && tsx watch --env-file-if-exists=.env.local src/server.ts",
+    "start": "npm run build:assets && tsx --env-file-if-exists=.env.local src/server.ts",
+    "build": "npm run build:assets && npm run typecheck",
+    "build:assets": "npm run build:css && npm run build:js",
+    "build:css": "tailwindcss -i src/styles/globals.css -o public/assets/app.css",
+    "build:js": "node scripts/build-client.mjs",
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx scripts/smoke.tsx"
   },
   "dependencies": {
     "@contentful/live-preview": "^4.6.42",
-    "@contentful/rich-text-react-renderer": "^16.1.2",
-    "autoprefixer": "^10.4.21",
+    "@hono/node-server": "^1.13.8",
+    "@hotwired/stimulus": "^3.2.2",
+    "@hotwired/turbo": "^8.0.13",
     "chalk": "^5.6.2",
     "contentful": "^11.7.15",
-    "contentful-resolve-response": "^1.9.3",
-    "eslint": "^9.35.0",
-    "eslint-config-next": "^16.3.0",
-    "next": "^16.3.0",
-    "postcss": "^8.5.6",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "safe-json-stringify": "^1.2.0",
-    "tailwindcss": "^4.1.13"
+    "hono": "^4.7.11",
+    "safe-json-stringify": "^1.2.0"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.1.13"
+    "@tailwindcss/cli": "^4.1.13",
+    "@types/node": "^22.13.5",
+    "esbuild": "^0.25.0",
+    "tailwindcss": "^4.1.13",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
   }
 }
