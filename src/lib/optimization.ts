@@ -27,13 +27,17 @@ export const personalizationEnabled = Boolean(
 );
 
 /**
- * Renders the track/identify demo controls.
+ * Renders the consent / track / identify demo controls.
  *
- * Off by default so a plain render stays markup-identical to the Next.js version
- * this app was ported from. Turn on with CONTENTFUL_OPTIMIZATION_DEMO_CONTROLS=true.
+ * ON by default. This is a demo, and the controls are how you reach the features
+ * it exists to show — consent in particular, which is fail-closed, so without a
+ * way to grant it the whole app just renders baseline and looks broken.
+ *
+ * Set CONTENTFUL_OPTIMIZATION_DEMO_CONTROLS=false for a clean render with markup
+ * identical to the Next.js version this was ported from.
  */
 export const demoControlsEnabled =
-  process.env.CONTENTFUL_OPTIMIZATION_DEMO_CONTROLS === "true";
+  process.env.CONTENTFUL_OPTIMIZATION_DEMO_CONTROLS !== "false";
 
 /** Public browser value, like an analytics id. Safe to send to the client. */
 export const optimizationClientId = process.env.CONTENTFUL_OPTIMIZATION_CLIENT;

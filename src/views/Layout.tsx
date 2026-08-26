@@ -194,7 +194,9 @@ export const Layout = ({
             {jsonScript(personalization.handoff)}
           </script>
         )}
-        {personalization?.demoControls && !draft && <DemoControls />}
+        {personalization?.demoControls && !draft && (
+          <DemoControls consent={personalization.consent} />
+        )}
       </main>
 
       {/*

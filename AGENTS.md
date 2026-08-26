@@ -142,6 +142,11 @@ test on a single desert request.
 
 ## Gotchas that look like bugs but are not
 
+- **`?habitat=` does nothing on a fresh clone.** Consent is fail-closed, so with no `cmp-consent`
+  cookie there is no `page` event and therefore no selections. Grant consent in the demo panel, or
+  `document.cookie = "cmp-consent=true; Path=/"`. This was reported as "personalization is broken"
+  once; the panel now server-renders a notice explaining it.
+
 - `data-action="click-&gt;optimization#..."` in the HTML source — `hono/jsx` escapes `>` in attribute
   values; the parser decodes it before Stimulus reads it. Correct as-is.
 - `optimizationContextId` absent from server-rendered `data-ctfl-*` — it is stateful-only by design.

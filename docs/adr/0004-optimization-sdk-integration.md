@@ -257,7 +257,7 @@ happens.
 ### `track` and `identify` demos
 
 Both on the Web SDK, in an env-gated `optimization-demo` control
-(`CONTENTFUL_OPTIMIZATION_DEMO_CONTROLS=true`, off by default so a plain render stays
+(`CONTENTFUL_OPTIMIZATION_DEMO_CONTROLS`, **on by default**; set `false` for a render
 markup-identical to the Next.js original). Both surface `{ accepted }` so the consent boundary is
 visible rather than mysterious.
 
@@ -317,6 +317,13 @@ Design points:
 
 The demo's Grant / Deny / Unset buttons are a CMP stand-in behind
 `CONTENTFUL_OPTIMIZATION_DEMO_CONTROLS`; a real integration has none of them.
+
+**The controls default to ON, and that is a consequence of fail-closed consent.** With them hidden, a
+fresh visit rendered baseline for an invisible reason and read as "personalization is broken" — it was
+reported as exactly that. Fail-closed is still the right default, so the fix was to make the state
+legible rather than to loosen it: the panel server-renders *why* content is baseline and offers the one
+click that resolves it. The alternative — treating an absent cookie as consent granted — was rejected
+because it bakes a permissive default into the very example someone is most likely to copy.
 
 *Supersedes the earlier "demo grants consent unconditionally" posture recorded elsewhere in this ADR.*
 

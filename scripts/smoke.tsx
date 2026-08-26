@@ -184,11 +184,26 @@ const withDemo = await render(
     children: BlockList({ blocks }),
   }),
 );
-check("off by default", !published.includes("Experience API demo"));
+const withDemoDenied = await render(
+  Layout({
+    draft: false,
+    personalization: { ...personalization, demoControls: true, consent: NOT_ASKED },
+    children: BlockList({ blocks }),
+  }),
+);
+check("hidden when explicitly disabled", !published.includes("Experience API demo"));
 check("rendered when enabled", withDemo.includes("Experience API demo"));
+// The whole point of flipping the default: a fresh visit must SAY why it is
+// baseline, rather than silently looking broken.
+check("explains why personalization is off", withDemoDenied.includes("Personalization is off."));
+check("names the not-asked case specifically", withDemoDenied.includes("No consent decision has been recorded"));
+check("no scary notice once consent is granted", !withDemo.includes("Personalization is off."));
+check("consent state is server-rendered", withDemo.includes("consent: events=true"));
+check("not-asked state is server-rendered", withDemoDenied.includes("consent: not asked"));
 check("track button wired", withDemo.includes("optimization#sendDemoEvent"));
 check("identify button wired", withDemo.includes("optimization#identifyDemoUser"));
 check("status target present", withDemo.includes('data-optimization-target="status"'));
+check("consent status target present", withDemo.includes('data-optimization-target="consentStatus"'));
 // hono/jsx escapes `>` inside attribute values, so the action ships as
 // `click-&gt;...`. The HTML parser decodes it before Stimulus reads the attribute,
 // so this is correct — asserted here so nobody "fixes" it into raw() output.

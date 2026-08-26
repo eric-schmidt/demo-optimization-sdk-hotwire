@@ -193,7 +193,8 @@ scripts/
 6. `CONTENTFUL_OPTIMIZATION_CLIENT` and `CONTENTFUL_OPTIMIZATION_ENV_ID` configure
    personalization (the environment is `main` for this demo). Both are optional: without a client id
    every render serves baseline content and no personalization JS is sent at all.
-   `CONTENTFUL_OPTIMIZATION_DEMO_CONTROLS=true` renders the `track`/`identify` demo buttons.
+   `CONTENTFUL_OPTIMIZATION_DEMO_CONTROLS` controls the demo panel (consent / `track` / `identify`).
+   It is **on by default**; set it to `false` for a clean render.
 7. Import the content model with the Contentful CLI:
 
    ```bash
@@ -235,6 +236,11 @@ npm run smoke   # render invariant checks (no credentials needed)
 ```
 
 Then open <http://localhost:3000>. `/` redirects to `/home`, the only slug in the demo space.
+
+> **First run shows baseline content.** Consent is fail-closed and no CMP decision exists yet, so no
+> `page` event is sent and every block renders its baseline. Click **Grant** in the demo panel
+> (bottom-left) and `?habitat=beach` / `?habitat=forest` will start swapping variants. See
+> [§Consent](#consent).
 
 ## How it works
 
@@ -368,7 +374,8 @@ writer that always sends the full state. Draft renders emit no analytics events 
 
 #### Demo events (`track` and `identify`)
 
-Set `CONTENTFUL_OPTIMIZATION_DEMO_CONTROLS=true` to render two buttons on published pages:
+The demo panel renders two buttons on published pages (set
+`CONTENTFUL_OPTIMIZATION_DEMO_CONTROLS=false` to hide it):
 
 - **`track`** sends a `demo_event`. ⚠️ For it to count toward an experience's metric, the event name
   must match what that metric is configured for — check it in the Contentful web app.
@@ -418,9 +425,12 @@ render, not retroactively on HTML already sent. `applyConsent()` in
 [`src/client/optimization.ts`](./src/client/optimization.ts) is the seam a CMP callback calls to update
 the live browser SDK immediately.
 
-With `CONTENTFUL_OPTIMIZATION_DEMO_CONTROLS=true` the demo panel gets **Grant / Deny / Unset** buttons
-that flip the cookie so this is demonstrable without installing a CMP. They stand in for the third
-party and would not exist in a real integration.
+The demo panel's **Grant / Deny / Unset** buttons flip that cookie so this is demonstrable without
+installing a CMP. They stand in for the third party and would not exist in a real integration.
+
+> **Because consent is fail-closed, a fresh clone shows baseline content until you grant it.** That is
+> correct behaviour, not a bug — so the demo panel renders a notice saying exactly that, rather than
+> leaving you to wonder why `?habitat=` appears to do nothing. Grant consent and the variants appear.
 
 #### Profile continuity
 
