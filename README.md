@@ -21,18 +21,127 @@ The point of this repo: **a non-React, server-rendered stack is a first-class Co
 compromise.** Variant selection happens on the server, so personalized content is in the initial HTML —
 no client-side swap, no flash of baseline, and only the selected variant is ever sent to the browser.
 
-| Capability | Status | Where |
+| Capability | Status |
+| --- | --- |
+| **Live Preview** — preview mode, inspector mode, live updates | ✅ |
+| **Variant selection** — server-side, in the initial HTML | ✅ |
+| **`page` tracking** — the event that returns the selections | ✅ |
+| **Interaction tracking** — views + clicks on `data-ctfl-*` | ✅ |
+| **`track`** — custom metric events from a real interaction | ✅ |
+| **`identify`** — profile aliasing + custom traits | ✅ |
+| **Consent** — third-party CMP cookie, fail-closed | ✅ |
+| **Audience simulation** — first-party preview panel, bridged to the server | ⚠️ partial |
+| **Caching / permutation caching** | ❌ deliberate — parked in [`backup/with-cache/`](./backup/with-cache) |
+| **Merge tags, Custom Flags, experiments** | ❌ not built — see [ADR 0004](./docs/adr/0004-optimization-sdk-integration.md) deferred work |
+
+### How each piece works
+
+Symbol names rather than line numbers, so these pointers do not rot silently as the code moves.
+
+#### Live Preview — preview mode, inspector mode, live updates
+
+Three independent mechanisms, covered in detail in [§Live Preview](#live-preview) below: an HMAC preview
+cookie selects the Preview API; `includeContentSourceMaps` embeds steganographic metadata that lands in
+the server-rendered HTML, so **inspector mode needs no field tagging at all**; and live updates round-trip
+the patched entry graph back through the same server templates as a Turbo Stream.
+
+- [`lib/preview.ts`](./src/lib/preview.ts) — `isPreviewRequest()` / `enablePreview()`, the cookie
+- [`routes/preview.ts`](./src/routes/preview.ts) — enter/leave preview, `POST /preview/render`
+- [`client/live-preview.ts`](./src/client/live-preview.ts) — `LivePreviewController`
+
+#### Variant selection — server-side
+
+The Contentful fetch returns the whole `landingPage` graph *including every variant*, so
+`resolveOptimizedEntry(baseline, selections)` is a **pure, local, network-free** call — no managed
+fetching and no extra request per block. Resolution happens in one module *before* JSX, so a resolver
+failure is a clean 500 rather than a half-streamed body, and the whole decision is unit-testable without
+credentials. `ComponentResolver` remains the single render seam for the published page, the draft page
+and every Turbo Stream.
+
+- [`lib/optimization-render.ts`](./src/lib/optimization-render.ts) — `resolveBlocks()`, the entire decision
+- [`lib/optimization.ts`](./src/lib/optimization.ts) — the process singleton (no `contentful` client, deliberately)
+- [`components/ComponentResolver.tsx`](./src/components/ComponentResolver.tsx) — the render seam
+
+#### `page` tracking — the event that returns the selections
+
+Emitted **server-side, once per render, from exactly one call site**. Its return value *is*
+`selectedOptimizations`, so no accepted page event means baseline everywhere. It runs concurrently with
+the content fetch (`Promise.allSettled`, so an Experience API failure cannot fail the page), and the
+request is bound with `forRequest()` whose `eventContext.page` carries the query string the audiences
+match on.
+
+- [`lib/optimization.ts`](./src/lib/optimization.ts) — `emitPageEvent()`, the only `page()` call in the repo; `forRequestFromContext()` builds the page context
+- [`routes/page.ts`](./src/routes/page.ts) — the concurrent fetch + event
+- [`client/optimization.ts`](./src/client/optimization.ts) — the browser passes `initialPageEvent: "skip"` on **every** navigation, because a Turbo visit is itself a server request
+
+#### Interaction tracking — views and clicks
+
+The **server** stamps `data-ctfl-*` onto each block, built with the SDK's own isomorphic
+`resolveOptimizedEntryTrackingAttributes` and normalised to strings (the click detector selects on the
+literal `[data-ctfl-clickable="true"]`). The browser SDK then observes those elements with its own
+document-wide `MutationObserver` — which is why Turbo swaps and Turbo Stream morphs need no re-binding,
+and why the controller's `disconnect()` is deliberately empty.
+
+- [`lib/optimization-render.ts`](./src/lib/optimization-render.ts) — attributes built server-side
+- [`components/Hero.tsx`](./src/components/Hero.tsx) — spread onto the existing `<section>` (no wrapper: `#page-blocks` is a flex column)
+- [`client/optimization.ts`](./src/client/optimization.ts) — `getSdk()` + `autoTrackEntryInteraction`, and the empty `disconnect()`
+
+#### `track` — a custom metric event from a real interaction
+
+A CTA wired through a Stimulus action calls `sdk.track({ event, properties })` and surfaces the returned
+`{ accepted }`, which makes the consent boundary visible rather than mysterious — `track` is refused
+before consent, unlike `page` and `identify`.
+
+- [`client/optimization.ts`](./src/client/optimization.ts) — `sendDemoEvent()`
+- [`views/DemoControls.tsx`](./src/views/DemoControls.tsx) — the button (env-gated)
+
+#### `identify` — profile aliasing and custom traits
+
+`sdk.identify({ userId, traits })` aliases the visitor. Because aliasing can change audience membership,
+identify returns *new* selections — and a server-rendered page cannot react to those on its own, so an
+accepted identify is followed by a Turbo visit and the **server** re-selects using the `ctfl-opt-aid`
+cookie. The general rule: browser-side profile mutations need a re-render to have visible effect.
+
+- [`client/optimization.ts`](./src/client/optimization.ts) — `identifyDemoUser()` and the re-render
+- [`lib/profile-cookie.ts`](./src/lib/profile-cookie.ts) — the cookie carrying the alias forward
+
+#### Consent — third-party CMP cookie, fail-closed
+
+One module reads the `cmp-consent` cookie and returns a decision with **two independent axes**
+(`events`, `persistence`) plus a `recorded` flag, so "not asked" stays distinguishable from an explicit
+no. It is passed into `forRequest()` server-side and seeded into the browser SDK's `defaults`. Both
+runtimes set `allowedEventTypes: []`, which is what makes refusal actually mean refusal — see
+[§Consent](#consent) for why that is required rather than defensive. The `persistence` axis flows into
+`canPersistProfile`, which gates the profile cookie; withdrawal actively deletes it.
+
+- [`lib/consent.ts`](./src/lib/consent.ts) — `readConsent()`, the only place the CMP is read
+- [`lib/optimization.ts`](./src/lib/optimization.ts) — `allowedEventTypes: []` and both axes into `forRequest()`
+- [`client/optimization.ts`](./src/client/optimization.ts) — browser `defaults` seeded from the server's decision; `applyConsent()` is the seam a CMP callback calls
+- [`lib/profile-cookie.ts`](./src/lib/profile-cookie.ts) — `clearProfileId()` on withdrawal
+
+#### Audience simulation — the preview panel, bridged to the server
+
+The first-party panel is a browser micro-frontend that forces an audience by mutating the SDK's selection
+signal — which does nothing on its own here, because the **server** renders. A bridge subscribes to that
+signal and posts the forced selections to `POST /preview/render`, which resolves them against the
+already-embedded entry graph and replies with a Turbo Stream that morphs the blocks in place.
+**One writer owns `#page-blocks`** and always posts *both* the entry graph and the selections, so a field
+edit cannot drop a forced audience or vice versa. Zero Contentful requests, and the panel is fed
+pre-fetched entries so no Contentful credential ever reaches the browser.
+
+- [`client/optimization-preview.ts`](./src/client/optimization-preview.ts) — subscribes to the selection signal
+- [`client/preview-render.ts`](./src/client/preview-render.ts) — the single writer (state on `window` — see [AGENTS.md](./AGENTS.md) trap 1)
+- [`routes/preview.ts`](./src/routes/preview.ts) — `POST /preview/render`, resolves and returns the Turbo Stream
+- [`routes/optimization.ts`](./src/routes/optimization.ts) — draft-gated audience/experience feed for the panel
+
+#### Supporting pieces
+
+| Piece | How | Code |
 | --- | --- | --- |
-| **Live Preview** — preview mode, inspector mode, live updates | ✅ | `lib/preview.ts`, `client/live-preview.ts`, `routes/preview.ts` |
-| **Personalization — variant selection** (server-side) | ✅ | `lib/optimization.ts`, `lib/optimization-render.ts` |
-| **`page` tracking** — the event that returns variant selections | ✅ | `emitPageEvent()`, server-side, once per render |
-| **Interaction tracking** — views + clicks on `data-ctfl-*` | ✅ | `client/optimization.ts` |
-| **`track`** — custom metric events from a real interaction | ✅ | demo control, `sendDemoEvent()` |
-| **`identify`** — profile aliasing + custom traits | ✅ | demo control, `identifyDemoUser()` |
-| **Consent** — third-party CMP cookie, fail-closed | ✅ | `lib/consent.ts` |
-| **Audience simulation** — first-party preview panel, bridged to the server | ⚠️ partial | `client/optimization-preview.ts`, `client/preview-render.ts` |
-| **Caching / permutation caching** | ❌ deliberate | parked in `backup/with-cache/` |
-| **Merge tags, Custom Flags, experiments** | ❌ not built | see ADR 0004 deferred work |
+| Four client bundles, one optimization bundle per page | Separate esbuild entry *files*, so the panel structurally cannot reach the published bundle | [`scripts/build-client.mjs`](./scripts/build-client.mjs) |
+| Baseline on outage | `requestTimeout: 700, retries: 0` + try/catch + `allSettled` + a per-block catch | [`lib/optimization.ts`](./src/lib/optimization.ts) |
+| Handoff to the browser | Server embeds profile + selections so the browser adopts them instead of re-resolving | [`views/Layout.tsx`](./src/views/Layout.tsx) |
+| Credential-free test suite | 90 assertions rendering fixtures through the real resolver | [`scripts/smoke.tsx`](./scripts/smoke.tsx) |
 
 > **⚠️ Known issue.** Live Preview's inspector outlines are drawn by the Contentful editor in the
 > *parent* frame, over the whole iframe, so they render on top of the preview panel and no z-index in
