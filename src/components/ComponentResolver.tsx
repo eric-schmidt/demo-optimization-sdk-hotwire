@@ -1,7 +1,6 @@
 import chalk from "chalk";
 import { ComponentMap } from "./ComponentMap";
-import { blockDomId } from "../lib/blocks";
-import type { BlockEntry } from "../lib/types";
+import type { ResolvedBlock } from "../lib/optimization-render";
 
 /**
  * The single component resolver.
@@ -18,8 +17,8 @@ import type { BlockEntry } from "../lib/types";
  * whether the Layout mounts a Stimulus controller. Published pages ship zero
  * Live Preview JS structurally rather than by discipline.
  */
-export const ComponentResolver = ({ entry }: { entry: BlockEntry }) => {
-  const contentTypeId = entry?.sys?.contentType?.sys?.id;
+export const ComponentResolver = ({ block }: { block: ResolvedBlock }) => {
+  const contentTypeId = block.entry?.sys?.contentType?.sys?.id;
   const Component = contentTypeId ? ComponentMap[contentTypeId] : undefined;
 
   if (!Component) {
@@ -27,14 +26,24 @@ export const ComponentResolver = ({ entry }: { entry: BlockEntry }) => {
     return null;
   }
 
-  return Component({ fields: entry.fields ?? {}, id: blockDomId(entry) }) as never;
+  // An empty variant is the author choosing to show nothing to this audience.
+  // `block.entry` still holds the baseline because the SDK keeps it for tracking
+  // context, so rendering it here would show baseline content to precisely the
+  // audience that was meant to see none.
+  if (block.isEmptyVariant) return null;
+
+  return Component({
+    fields: block.entry.fields ?? {},
+    id: block.domId,
+    trackingAttributes: block.trackingAttributes,
+  }) as never;
 };
 
 /** Renders an ordered list of blocks. Used for the initial page and every Turbo Stream. */
-export const BlockList = ({ blocks }: { blocks: BlockEntry[] }) => (
+export const BlockList = ({ blocks }: { blocks: ResolvedBlock[] }) => (
   <>
-    {blocks.map((entry) => (
-      <ComponentResolver entry={entry} />
+    {blocks.map((block) => (
+      <ComponentResolver block={block} />
     ))}
   </>
 );

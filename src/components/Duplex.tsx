@@ -8,7 +8,7 @@ import type { BlockProps } from "../lib/types";
  * gradient body background — this is a faithful port, and the bug is visual
  * rather than functional. See docs/plans/2026-08-25-nextjs-to-hotwire-port.md §5.
  */
-export const Duplex = ({ fields, id }: BlockProps) => {
+export const Duplex = ({ fields, id, trackingAttributes }: BlockProps) => {
   const { heading, copy, image } = fields;
   const resolved = resolveImage(image);
 
@@ -16,6 +16,7 @@ export const Duplex = ({ fields, id }: BlockProps) => {
     <section
       id={id}
       class="grid grid-cols-1 md:grid-cols-2 gap-12 p-6 mt-12"
+      {...trackingAttributes}
     >
       <div class="text-white flex flex-col justify-center">
         <h2 class="text-2xl mb-4">{heading || ""}</h2>

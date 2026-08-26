@@ -13,12 +13,12 @@ import type { BlockProps } from "../lib/types";
  * The `id` is the Turbo morph anchor. It lives on the <section> rather than a
  * wrapper element so the DOM stays identical to the Next.js output.
  */
-export const Hero = ({ fields, id }: BlockProps) => {
+export const Hero = ({ fields, id, trackingAttributes }: BlockProps) => {
   const { heading, copy, image } = fields;
   const resolved = resolveImage(image);
 
   return (
-    <section id={id} class="container relative">
+    <section id={id} class="container relative" {...trackingAttributes}>
       <div class="relative z-10 md:max-w-lg px-10 py-20 md:px-10 md:py-40">
         <h1 class="drop-shadow-lg mb-4">{heading || ""}</h1>
 

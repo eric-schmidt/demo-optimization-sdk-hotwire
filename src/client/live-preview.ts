@@ -3,13 +3,7 @@
 
 import { Controller } from "@hotwired/stimulus";
 import { ContentfulLivePreview } from "@contentful/live-preview";
-
-declare global {
-  interface Window {
-    // Set by @hotwired/turbo in the app bundle.
-    Turbo: { renderStreamMessage: (html: string) => void };
-  }
-}
+import { setPages } from "./preview-render";
 
 /**
  * Reads the entry graph the server serialised into the page.
@@ -49,14 +43,38 @@ export class LivePreviewController extends Controller<HTMLElement> {
       locale: this.localeValue,
       enableInspectorMode: true,
       enableLiveUpdates: true,
+      experimental: {
+        // Inspector outlines are drawn by the Contentful editor in the PARENT
+        // frame, over the whole iframe — this SDK creates no DOM and ships no
+        // z-index — so nothing in this document can be stacked above them. That
+        // matters here because the preview panel is a fixed 24rem drawer that
+        // page content sits underneath, and the outline for that content is
+        // painted straight across the panel.
+        //
+        // This is the platform's own lever: the SDK reports, per tagged element,
+        // whether it is covered, and the editor suppresses those outlines.
+        //
+        // PARTIAL BY DESIGN. The check is `elementFromPoint` at all four corners
+        // and an element counts as covered only when FEWER THAN TWO corners are
+        // its own. A block whose right edge runs under the drawer keeps both left
+        // corners, so it is still considered visible and still gets an outline.
+        // It reliably helps blocks mostly beneath the drawer, not partially
+        // covered ones. See ADR 0004 for the alternatives and why they were
+        // rejected.
+        hideCoveredElementOutlines: true,
+      },
     });
 
-    // Called once immediately with the restored data, then once per edit.
+    // Called ONLY when the editor sends an ENTRY_UPDATED message — i.e. once per
+    // edit, and NOT on subscribe. (useContentfulLiveUpdates returns initial data
+    // synchronously; the imperative subscribe does not.) That is why
+    // preview-render reads the embedded entry graph itself rather than waiting
+    // for this callback: otherwise nothing works until the first keystroke.
     this.unsubscribe = ContentfulLivePreview.subscribe({
       data: data as never,
       locale: this.localeValue,
       callback: (updated: unknown) => {
-        void this.rerender(updated);
+        setPages(updated);
       },
     });
   }
@@ -64,37 +82,6 @@ export class LivePreviewController extends Controller<HTMLElement> {
   disconnect(): void {
     this.unsubscribe?.();
     this.unsubscribe = undefined;
-  }
-
-  /**
-   * Hand the patched graph back to the server and let it re-render.
-   *
-   * The alternative — patching the DOM here — would mean reimplementing the
-   * templates in the browser, which is exactly what Hotwire exists to avoid, and
-   * would break as soon as an edit changes structure rather than just text.
-   */
-  private async rerender(updated: unknown): Promise<void> {
-    try {
-      const response = await fetch("/preview/render", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "text/vnd.turbo-stream.html",
-        },
-        body: JSON.stringify(updated),
-      });
-
-      if (!response.ok) {
-        console.error(
-          `[live-preview] render failed: ${response.status} ${response.statusText}`,
-        );
-        return;
-      }
-
-      window.Turbo.renderStreamMessage(await response.text());
-    } catch (error) {
-      console.error("[live-preview] render request failed", error);
-    }
   }
 }
 
