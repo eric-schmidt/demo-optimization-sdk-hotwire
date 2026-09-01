@@ -1,16 +1,186 @@
-# Demo - Live Preview (Hotwire)
+# Demo — Contentful Live Preview + Personalization on Hotwire
 
-A Contentful Live Preview demo built with [Hotwire](https://hotwired.dev/) — Turbo and
-Stimulus over server-rendered HTML. This is a one-to-one reimplementation of the Next.js
-version of this demo; it renders the same content, the same markup, and the same classes.
+A Contentful **Live Preview and Personalization** demo built with [Hotwire](https://hotwired.dev/) —
+Turbo and Stimulus over server-rendered HTML. It began as a one-to-one reimplementation of the Next.js
+version of this demo, rendering the same content, markup and classes, and now also does server-side
+variant selection with the Contentful Optimization SDK.
 
 **Stack:** Node + TypeScript, [Hono](https://hono.dev/) for routing and server-side HTML
 rendering via `hono/jsx`, Turbo Drive for navigation, Stimulus for the small amount of
 remaining JS, Tailwind v4. **No React is shipped to the browser.**
 
 Why Node rather than Rails — and the rationale behind every other significant choice — is in
-[`docs/plans/2026-08-25-nextjs-to-hotwire-port.md`](./docs/plans/2026-08-25-nextjs-to-hotwire-port.md).
-Read that first if you are picking this up cold.
+[`docs/plans/2026-08-25-nextjs-to-hotwire-port.md`](./docs/plans/2026-08-25-nextjs-to-hotwire-port.md)
+(the port) and [`docs/adr/0004-optimization-sdk-integration.md`](./docs/adr/0004-optimization-sdk-integration.md)
+(personalization). Read those if you are picking this up cold. Agents should start with
+[`AGENTS.md`](./AGENTS.md).
+
+## What this demonstrates
+
+The point of this repo: **a non-React, server-rendered stack is a first-class Contentful target, not a
+compromise.** Variant selection happens on the server, so personalized content is in the initial HTML —
+no client-side swap, no flash of baseline, and only the selected variant is ever sent to the browser.
+
+| Capability | Status |
+| --- | --- |
+| **Live Preview** — preview mode, inspector mode, live updates | ✅ |
+| **Variant selection** — server-side, in the initial HTML | ✅ |
+| **`page` tracking** — the event that returns the selections | ✅ |
+| **Interaction tracking** — views + clicks on `data-ctfl-*` | ✅ |
+| **`track`** — custom metric events from a real interaction | ✅ |
+| **`identify`** — profile aliasing + custom traits | ✅ |
+| **Consent** — third-party CMP cookie, fail-closed | ✅ |
+| **Audience simulation** — first-party preview panel, bridged to the server | ⚠️ partial |
+| **Caching / permutation caching** | ❌ deliberate — parked in [`backup/with-cache/`](./backup/with-cache) |
+| **Merge tags, Custom Flags, experiments** | ❌ not built — see [ADR 0004](./docs/adr/0004-optimization-sdk-integration.md) deferred work |
+
+### How each piece works
+
+Symbol names rather than line numbers, so these pointers do not rot silently as the code moves.
+
+#### Live Preview — preview mode, inspector mode, live updates
+
+Three independent mechanisms, covered in detail in [§Live Preview](#live-preview) below: an HMAC preview
+cookie selects the Preview API; `includeContentSourceMaps` embeds steganographic metadata that lands in
+the server-rendered HTML, so **inspector mode needs no field tagging at all**; and live updates round-trip
+the patched entry graph back through the same server templates as a Turbo Stream.
+
+- [`lib/preview.ts`](./src/lib/preview.ts) — `isPreviewRequest()` / `enablePreview()`, the cookie
+- [`routes/preview.ts`](./src/routes/preview.ts) — enter/leave preview, `POST /preview/render`
+- [`client/live-preview.ts`](./src/client/live-preview.ts) — `LivePreviewController`
+
+#### Variant selection — server-side
+
+The Contentful fetch returns the whole `landingPage` graph *including every variant*, so
+`resolveOptimizedEntry(baseline, selections)` is a **pure, local, network-free** call — no managed
+fetching and no extra request per block. Resolution happens in one module *before* JSX, so a resolver
+failure is a clean 500 rather than a half-streamed body, and the whole decision is unit-testable without
+credentials. `ComponentResolver` remains the single render seam for the published page, the draft page
+and every Turbo Stream.
+
+- [`lib/optimization-render.ts`](./src/lib/optimization-render.ts) — `resolveBlocks()`, the entire decision
+- [`lib/optimization.ts`](./src/lib/optimization.ts) — the process singleton (no `contentful` client, deliberately)
+- [`components/ComponentResolver.tsx`](./src/components/ComponentResolver.tsx) — the render seam
+
+#### `page` tracking — the event that returns the selections
+
+Emitted **server-side, once per render, from exactly one call site**. Its return value *is*
+`selectedOptimizations`, so no accepted page event means baseline everywhere. It runs concurrently with
+the content fetch (`Promise.allSettled`, so an Experience API failure cannot fail the page), and the
+request is bound with `forRequest()` whose `eventContext.page` carries the query string the audiences
+match on.
+
+- [`lib/optimization.ts`](./src/lib/optimization.ts) — `emitPageEvent()`, the only `page()` call in the repo; `forRequestFromContext()` builds the page context
+- [`routes/page.ts`](./src/routes/page.ts) — the concurrent fetch + event
+- [`client/optimization.ts`](./src/client/optimization.ts) — the browser passes `initialPageEvent: "skip"` on **every** navigation, because a Turbo visit is itself a server request
+
+#### Interaction tracking — views and clicks
+
+The **server** stamps `data-ctfl-*` onto each block, built with the SDK's own isomorphic
+`resolveOptimizedEntryTrackingAttributes` and normalised to strings (the click detector selects on the
+literal `[data-ctfl-clickable="true"]`). The browser SDK then observes those elements with its own
+document-wide `MutationObserver` — which is why Turbo swaps and Turbo Stream morphs need no re-binding,
+and why the controller's `disconnect()` is deliberately empty.
+
+- [`lib/optimization-render.ts`](./src/lib/optimization-render.ts) — attributes built server-side
+- [`components/Hero.tsx`](./src/components/Hero.tsx) — spread onto the existing `<section>` (no wrapper: `#page-blocks` is a flex column)
+- [`client/optimization.ts`](./src/client/optimization.ts) — `getSdk()` + `autoTrackEntryInteraction`, and the empty `disconnect()`
+
+#### `track` — a custom metric event from a real interaction
+
+A CTA wired through a Stimulus action calls `sdk.track({ event, properties })` and surfaces the returned
+`{ accepted }`, which makes the consent boundary visible rather than mysterious — `track` is refused
+before consent, unlike `page` and `identify`.
+
+- [`client/optimization.ts`](./src/client/optimization.ts) — `sendDemoEvent()`
+- [`views/DemoControls.tsx`](./src/views/DemoControls.tsx) — the button (env-gated)
+
+#### `identify` — profile aliasing and custom traits
+
+`sdk.identify({ userId, traits })` aliases the visitor. Because aliasing can change audience membership,
+identify returns *new* selections — and a server-rendered page cannot react to those on its own, so an
+accepted identify is followed by a Turbo visit and the **server** re-selects using the `ctfl-opt-aid`
+cookie. The general rule: browser-side profile mutations need a re-render to have visible effect.
+
+- [`client/optimization.ts`](./src/client/optimization.ts) — `identifyDemoUser()` and the re-render
+- [`lib/profile-cookie.ts`](./src/lib/profile-cookie.ts) — the cookie carrying the alias forward
+
+#### Consent — third-party CMP cookie, fail-closed
+
+One module reads the `cmp-consent` cookie and returns a decision with **two independent axes**
+(`events`, `persistence`) plus a `recorded` flag, so "not asked" stays distinguishable from an explicit
+no. It is passed into `forRequest()` server-side and seeded into the browser SDK's `defaults`. Both
+runtimes set `allowedEventTypes: []`, which is what makes refusal actually mean refusal — see
+[§Consent](#consent) for why that is required rather than defensive. The `persistence` axis flows into
+`canPersistProfile`, which gates the profile cookie; withdrawal actively deletes it.
+
+- [`lib/consent.ts`](./src/lib/consent.ts) — `readConsent()`, the only place the CMP is read
+- [`lib/optimization.ts`](./src/lib/optimization.ts) — `allowedEventTypes: []` and both axes into `forRequest()`
+- [`client/optimization.ts`](./src/client/optimization.ts) — browser `defaults` seeded from the server's decision; `applyConsent()` is the seam a CMP callback calls
+- [`lib/profile-cookie.ts`](./src/lib/profile-cookie.ts) — `clearProfileId()` on withdrawal
+
+#### Audience simulation — the preview panel, bridged to the server
+
+The first-party panel is a browser micro-frontend that forces an audience by mutating the SDK's selection
+signal — which does nothing on its own here, because the **server** renders. A bridge subscribes to that
+signal and posts the forced selections to `POST /preview/render`, which resolves them against the
+already-embedded entry graph and replies with a Turbo Stream that morphs the blocks in place.
+**One writer owns `#page-blocks`** and always posts *both* the entry graph and the selections, so a field
+edit cannot drop a forced audience or vice versa. Zero Contentful requests, and the panel is fed
+pre-fetched entries so no Contentful credential ever reaches the browser.
+
+- [`client/optimization-preview.ts`](./src/client/optimization-preview.ts) — subscribes to the selection signal
+- [`client/preview-render.ts`](./src/client/preview-render.ts) — the single writer (state on `window` — see [AGENTS.md](./AGENTS.md) trap 1)
+- [`routes/preview.ts`](./src/routes/preview.ts) — `POST /preview/render`, resolves and returns the Turbo Stream
+- [`routes/optimization.ts`](./src/routes/optimization.ts) — draft-gated audience/experience feed for the panel
+
+#### Supporting pieces
+
+| Piece | How | Code |
+| --- | --- | --- |
+| Four client bundles, one optimization bundle per page | Separate esbuild entry *files*, so the panel structurally cannot reach the published bundle | [`scripts/build-client.mjs`](./scripts/build-client.mjs) |
+| Baseline on outage | `requestTimeout: 700, retries: 0` + try/catch + `allSettled` + a per-block catch | [`lib/optimization.ts`](./src/lib/optimization.ts) |
+| Handoff to the browser | Server embeds profile + selections so the browser adopts them instead of re-resolving | [`views/Layout.tsx`](./src/views/Layout.tsx) |
+| Credential-free test suite | 90 assertions rendering fixtures through the real resolver | [`scripts/smoke.tsx`](./scripts/smoke.tsx) |
+
+> **⚠️ Known issue.** Live Preview's inspector outlines are drawn by the Contentful editor in the
+> *parent* frame, over the whole iframe, so they render on top of the preview panel and no z-index in
+> this app can change that. `hideCoveredElementOutlines` is enabled, which helps only for elements
+> mostly covered. Rejected alternatives and the reasoning are in ADR 0004.
+
+### Where things live
+
+```
+src/
+  server.ts                      Hono app + the single per-request middleware
+                                 (preview flag, consent decision, optimization client)
+  routes/
+    page.ts                      GET /:slug — the whole request path
+    preview.ts                   preview mode + POST /preview/render (Turbo Stream)
+    optimization.ts              GET /preview/optimization-entries (panel data)
+  lib/
+    contentful.ts                CDA/CPA clients, the one query, toPlainJson
+    optimization.ts              SDK singleton, forRequest(), emitPageEvent()  ← page event lives here
+    optimization-render.ts       PURE variant selection + data-ctfl-* attributes
+    consent.ts                   reads the third-party CMP cookie
+    profile-cookie.ts            ctfl-opt-aid lifecycle (app-owned by design)
+    blocks.ts  image.ts  preview.ts  locale.ts  types.ts
+  components/
+    ComponentResolver.tsx        the single render seam (entry -> component)
+    ComponentMap.ts  Hero.tsx  Duplex.tsx
+  views/
+    Layout.tsx                   <head>, bundles, handoff JSON, controller mounts
+    DemoControls.tsx  NotFound.tsx
+  client/                        four esbuild entrypoints -> public/assets/
+    index.ts                     app.js                  Turbo + Stimulus (every page)
+    optimization.ts              optimization.js         Web SDK, tracking, track/identify
+    optimization-preview.ts      optimization-preview.js Web SDK + preview panel (DRAFT only)
+    live-preview.ts              live-preview.js         Live Preview SDK (DRAFT only)
+    preview-render.ts            the single writer to #page-blocks (shared via window)
+scripts/
+  smoke.tsx                      90 credential-free render/logic assertions
+  build-client.mjs               the four-bundle esbuild config
+```
 
 ## Initial Setup
 
@@ -20,8 +190,11 @@ Read that first if you are picking this up cold.
 4. Populate `.env.local` with values for `CONTENTFUL_SPACE_ID`, `CONTENTFUL_ENV_ID`,
    `CONTENTFUL_DELIVERY_KEY`, and `CONTENTFUL_PREVIEW_KEY`.
 5. `CONTENTFUL_PREVIEW_SECRET` is a key you invent; it gates the Content Preview URL.
-6. `CONTENTFUL_OPTIMIZATION_CLIENT` and `CONTENTFUL_OPTIMIZATION_ENV_ID` are used for the
-   forthcoming Contentful Optimization SDK integration.
+6. `CONTENTFUL_OPTIMIZATION_CLIENT` and `CONTENTFUL_OPTIMIZATION_ENV_ID` configure
+   personalization (the environment is `main` for this demo). Both are optional: without a client id
+   every render serves baseline content and no personalization JS is sent at all.
+   `CONTENTFUL_OPTIMIZATION_DEMO_CONTROLS` controls the demo panel (consent / `track` / `identify`).
+   It is **on by default**; set it to `false` for a clean render.
 7. Import the content model with the Contentful CLI:
 
    ```bash
@@ -30,6 +203,12 @@ Read that first if you are picking this up cold.
      --environment-id <YOUR ENVIRONMENT ID> \
      --content-file contentful-export-zh1nhbmve68h-master-2026-08-11T09-14-44.json
    ```
+
+   > ⚠️ **This export is stale and will not reproduce the personalization demo.** It predates the
+   > Personalization app install, so it has no `nt_audience` / `nt_experience` / `nt_mergetag` content
+   > types and no `nt_experiences` field on `hero` or `duplex`. Importing it into a fresh space gives
+   > you the Live Preview demo only. Re-export from `zh1nhbmve68h` if you need the full thing — and
+   > read the security note at the bottom of this file first.
 
    > Use the export file, **not** `content-model.json`. That file is an unrelated
    > Ninetailed-era model (`page` / `componentHeroBanner` / `componentDuplex`); this app
@@ -58,13 +237,26 @@ npm run smoke   # render invariant checks (no credentials needed)
 
 Then open <http://localhost:3000>. `/` redirects to `/home`, the only slug in the demo space.
 
+> **First run shows baseline content.** Consent is fail-closed and no CMP decision exists yet, so no
+> `page` event is sent and every block renders its baseline. Click **Grant** in the demo panel
+> (bottom-left) and `?habitat=beach` / `?habitat=forest` will start swapping variants. See
+> [§Consent](#consent).
+
 ## How it works
 
 ```
-GET /:slug ──► routes/page.ts ──► lib/contentful.ts ──► CDA  (published)
-                     │                              └──► CPA  (draft)
-                     └──► views/Layout ──► components/ComponentResolver ──► Hero | Duplex
+GET /:slug ──► routes/page.ts ──┬─► lib/contentful.ts ────► CDA (published) / CPA (draft)
+                                └─► lib/optimization.ts ──► Experience API  (published only)
+                                       emitPageEvent()
+                     │
+                     ├─► lib/optimization-render.ts  resolveBlocks(blocks, selections)
+                     └─► views/Layout ──► components/ComponentResolver ──► Hero | Duplex
 ```
+
+The content fetch and the Experience API call run concurrently — neither depends on the other. The
+`page` event is what returns the variant selections, so it is the ignition for the whole
+personalization loop, and it is emitted in exactly one place: `emitPageEvent()` in
+`src/lib/optimization.ts`.
 
 Requests are served as complete HTML. Turbo Drive then intercepts subsequent navigations and
 swaps the body rather than reloading, and Stimulus attaches behaviour to what is already
@@ -78,6 +270,7 @@ GET    /:slug            render a landingPage
 GET    /preview          enter preview mode, then redirect to the entry's slug
 DELETE /preview          leave preview mode
 POST   /preview/render   re-render blocks as a Turbo Stream (preview only)
+GET    /preview/optimization-entries    audiences + experiences for the preview panel
 ```
 
 Nothing lives under `/api`. In a Hotwire app `/api/*` signals a JSON API for external
@@ -111,11 +304,140 @@ Every request fetches from Contentful. Save an entry, reload the page, see the c
 invalidation step, no webhook, no cache to clear. Responses are sent `Cache-Control: no-store`
 so the browser does not hold onto them either.
 
+Personalized responses additionally send `turbo-cache-control: no-cache`, because Turbo Drive's page
+cache would otherwise restore one audience's HTML and show it to another after a back navigation. That
+is a correctness bug rather than a staleness annoyance, and it costs instant back-navigation.
+
+**No permutation caching.** The Optimization SDK can precompute and share a finite set of public
+permutations; this demo deliberately does not, to keep one selection path. If caching is ever restored
+it must become audience-aware in the same change — and note the audience dimension here is the **query
+string**, not just the slug. See ADR 0004's deferred-work section.
+
 This is deliberate for a rendering demo. A tag-indexed cache reproducing what Next.js Cache
 Components provided — `cacheTag` by `sys.id`, `cacheLife` profiles, stale-while-revalidate, and
 a `POST /api/revalidate` webhook target — is parked verbatim in
 [`backup/with-cache/`](./backup/with-cache) with restore instructions, because it is the part of
 this port most worth showing in an architecture conversation even though it gets in the way here.
+
+### Personalization
+
+Variant selection happens **on the server**, so the personalized content is in the initial HTML —
+there is no client-side swap and no flash of baseline. Only the selected variant is ever sent to the
+browser. Full rationale in
+[ADR 0004](./docs/adr/0004-optimization-sdk-integration.md).
+
+|                        | Where                                                            | How                                                                                    |
+| ---------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| **Variant selection**  | `src/lib/optimization.ts` + `src/lib/optimization-render.ts`      | `page()` returns selections; `resolveOptimizedEntry` swaps the entry. Pure, no network  |
+| **Interaction tracking** | `src/client/optimization.ts`                                    | The server stamps `data-ctfl-*`; the Web SDK observes them with its own MutationObserver |
+| **Audience simulation**  | `src/client/optimization-preview.ts` (draft only)               | The first-party preview panel, bridged to the server via a Turbo Stream                |
+
+#### Driving the demo
+
+Every audience in the demo space targets the **`habitat` query parameter**, so the URL is the control
+surface. There is deliberately no switcher UI on published pages — audience simulation is the preview
+panel's job.
+
+```bash
+curl -s 'http://localhost:3000/home'                | grep -o 'data-ctfl-entry-id="[^"]*"'
+curl -s 'http://localhost:3000/home?habitat=beach'  | grep -o 'data-ctfl-entry-id="[^"]*"'
+curl -s 'http://localhost:3000/home?habitat=forest' | grep -o 'data-ctfl-entry-id="[^"]*"'
+```
+
+| URL | Hero | Duplex |
+| --- | --- | --- |
+| `/home` | `[Baseline] Ea Est Voluptate` | `[Baseline] Praesentium Harum Repellat` |
+| `/home?habitat=beach` | `Litora Maris Aestivum` | `Harena Palmae Otium` |
+| `/home?habitat=forest` | `Silvae Umbra Alta` | `Semita Arborum Viridis` |
+| `/home?habitat=desert` | `Ea Est Voluptate` (90% of the time) | *no experience* |
+
+> **`?habitat=desert` is not deterministic.** That experience is configured
+> `distribution: [0.1, 0.9]`, so roughly 1 request in 10 legitimately returns the baseline. Measured
+> 1/19 over 20 requests. Beach and Forest are `[0, 1]` and always return their variant. Don't file a
+> bug against the Desert hero without looping it first.
+
+If both the plain and the `?habitat=` URLs return baseline ids, the page context is not reaching the
+Experience API — that is the one failure this whole integration has to get right, and it is silent.
+
+#### Audience simulation in preview
+
+Draft renders deliberately show **baseline** content: an editor should see what they are editing, not
+whichever variant their own profile happens to match. To view a variant in preview, open the preview
+panel (its toggle button attaches itself to the page) and force an audience. The panel is
+Contentful's own; it changes the browser SDK's selection state, and because this app renders on the
+server, a small bridge posts those selections back to `/preview/render`, which replies with a Turbo
+Stream that morphs the blocks in place.
+
+A forced audience and a live field edit compose: editing a field re-renders under the currently forced
+audience, and switching audience keeps the edited field. That works because both go through a single
+writer that always sends the full state. Draft renders emit no analytics events at all.
+
+#### Demo events (`track` and `identify`)
+
+The demo panel renders two buttons on published pages (set
+`CONTENTFUL_OPTIMIZATION_DEMO_CONTROLS=false` to hide it):
+
+- **`track`** sends a `demo_event`. ⚠️ For it to count toward an experience's metric, the event name
+  must match what that metric is configured for — check it in the Contentful web app.
+- **`identify`** aliases the visitor to `demo-user-123` with custom traits. Because aliasing can change
+  audience membership, and this app renders on the server, an accepted `identify` is followed by a
+  Turbo visit so the server re-selects. Both buttons show whether the event was `accepted`, which makes
+  the consent boundary visible — `track` is refused before consent, `identify` and `page` are not.
+
+> **Consent in this demo is granted unconditionally.** A real integration wires a CMP here. The two
+> axes are independent: `events` admits analytics and personalization, `persistence` allows profile
+> continuity.
+
+#### Consent
+
+Consent is modelled the way a real deployment works: a **third-party CMP owns the decision** and
+publishes it as a cookie that both the server and the browser can read. This app never asks the
+visitor anything — it reads `cmp-consent` (`"true"` / `"false"`) and tells both SDKs what they may do.
+Swapping in a real CMP means changing `readConsent` in
+[`src/lib/consent.ts`](./src/lib/consent.ts) and nothing else.
+
+| `cmp-consent` | Personalization | Profile cookie | Experience API |
+| --- | --- | --- | --- |
+| `true` | variant selected | written | one call per render |
+| `false` | baseline | deleted | not called |
+| *absent* (not asked) | baseline | not written | not called |
+
+Three details that are easy to get wrong:
+
+- **`consent: false` does not block anything on its own.** The SDK's admission check is
+  `if (consent === true) return true; return allowedEventTypes.includes(method)` — so `false` and
+  "not asked" both fall through to the allow-list, whose default is `['identify', 'page']` in **both**
+  runtimes. Left at the default, a visitor who refused consent still emits a page event, still costs a
+  round trip and still gets a profile. Both SDKs are therefore configured
+  `allowedEventTypes: []`, which is what makes refusal actually mean refusal. It costs nothing when
+  consent is granted, because `consent === true` short-circuits before the list is read.
+- **"Not asked" is not "no".** The SDK's consent state is `undefined` until a decision exists, and that
+  is distinct from `false`. The decision is forwarded to the browser with a `recorded` flag so the
+  Web SDK is seeded as `undefined` rather than being told the visitor declined.
+- **The two axes are independent.** `events` (may we emit?) and `persistence` (may we remember?) are
+  passed through separately, so "personalize this page but don't remember me" is expressible.
+  `persistence: false` makes the SDK's `canPersistProfile` false, which is what stops the profile
+  cookie being written — and withdrawal actively deletes an existing one rather than just letting it
+  go stale.
+
+Because the **server** selects the variant, newly-granted consent takes visible effect on the next
+render, not retroactively on HTML already sent. `applyConsent()` in
+[`src/client/optimization.ts`](./src/client/optimization.ts) is the seam a CMP callback calls to update
+the live browser SDK immediately.
+
+The demo panel's **Grant / Deny / Unset** buttons flip that cookie so this is demonstrable without
+installing a CMP. They stand in for the third party and would not exist in a real integration.
+
+> **Because consent is fail-closed, a fresh clone shows baseline content until you grant it.** That is
+> correct behaviour, not a bug — so the demo panel renders a notice saying exactly that, rather than
+> leaving you to wonder why `?habitat=` appears to do nothing. Grant consent and the variants appear.
+
+#### Profile continuity
+
+The visitor profile id lives in the `ctfl-opt-aid` cookie, which is deliberately **not** `HttpOnly`
+because the browser SDK shares it. Over plain `http://localhost` the cookie cannot be `Secure`, so it
+falls back to `SameSite=Lax`; inside Contentful's cross-site preview iframe it needs `None; Secure`,
+which is another reason preview needs the HTTPS tunnel below.
 
 ### Live Preview
 
@@ -188,8 +510,12 @@ The full list with reasoning is in §5 of the
 - [`docs/adr/`](./docs/adr) — ADRs 0001 and 0002 describe the Next.js design this replaced and
   are retained because they explain _why_ the code looked the way it did. ADR 0003 records the
   port itself.
-- [`docs/optimization-sdk-hotwire-fit.md`](./docs/optimization-sdk-hotwire-fit.md) — how
-  Contentful Personalization would be added. No personalization code exists in this repo yet.
+- [`docs/adr/0004-optimization-sdk-integration.md`](./docs/adr/0004-optimization-sdk-integration.md)
+  — the personalization integration: every decision, its rejected alternative, and a deferred-work
+  section covering caching, merge tags, flags, experiments and Turbo Frames.
+- [`docs/optimization-sdk-hotwire-fit.md`](./docs/optimization-sdk-hotwire-fit.md) — the original desk
+  assessment, now **superseded in part** and annotated with what it got wrong. Kept because its
+  division-of-labour reasoning held up and its mistakes are the ones most likely to be re-proposed.
 - [`backup/with-cache/`](./backup/with-cache) — the tag-based caching implementation, parked.
 
 ## Security note

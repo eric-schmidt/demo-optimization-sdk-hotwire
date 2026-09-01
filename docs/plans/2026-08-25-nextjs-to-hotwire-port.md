@@ -266,6 +266,14 @@ so published renders don't pay for it).
 ## 8. Load-bearing details that must not drift
 
 1. Query: `content_type=landingPage&fields.slug=:slug&include=4`. Iterate **all** matched items,
+
+   > **Amended 2026-08-25 (ADR 0004):** the include depth is now **10**, not 4. Personalization needs
+   > baseline → `nt_experiences` → `nt_variants` → the variant entry → its image → the asset. The graph
+   > happens to resolve at 4 today, because the deepest *entry* in that chain sits at level 4 and assets
+   > referenced by included entries return regardless — but that is one level of headroom, and a link
+   > left unresolved past the depth resolves to **baseline silently, with no error**. The rest of this
+   > invariant (iterate all matched items, one locale, plain JSON) still holds.
+
    not just `[0]`. Render `fields.hero` first, then each of `fields.content[]`, resolved through
    `ComponentMap` keyed on `entry.sys.contentType.sys.id` (`hero`, `duplex`). Unmapped →
    `chalk.red` log + skip. Empty result → 404.

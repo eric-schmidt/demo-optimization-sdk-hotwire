@@ -1,3 +1,6 @@
+import type { CoreStatelessRequest } from "@contentful/optimization-node/core-sdk";
+import type { ConsentDecision } from "./consent";
+
 // Shapes of the Contentful entries this demo renders.
 //
 // Deliberately loose: Preview API responses can carry unresolved links and
@@ -43,15 +46,29 @@ export type BlockFields = {
   heading?: string;
   copy?: string;
   image?: MediaWrapper;
+  /**
+   * Added to `hero` and `duplex` by the Contentful Personalization app. Left
+   * deliberately untyped: the SDK validates its shape structurally, and a local
+   * mirror of the nt_* schema would rot without ever being read by this app.
+   */
+  nt_experiences?: unknown;
 };
 
 export type BlockEntry = {
   sys: ContentfulSys;
   fields?: BlockFields;
+  /**
+   * Present on every CDA response. The Optimization SDK's entry type guard
+   * requires it (`isRecord(metadata)`), so an entry without it resolves to
+   * baseline — which is why scripts/smoke.tsx fixtures must include it.
+   */
+  metadata?: { tags?: unknown[]; concepts?: unknown[] };
 };
 
 export type LandingPage = {
   sys: ContentfulSys;
+  /** See BlockEntry.metadata — every CDA entry carries it. */
+  metadata?: { tags?: unknown[]; concepts?: unknown[] };
   fields?: {
     adminTitle?: string;
     slug?: string;
@@ -65,15 +82,29 @@ export type BlockProps = {
   fields: BlockFields;
   /** DOM id used as the Turbo morph anchor for this block. */
   id: string;
+  /**
+   * `data-ctfl-*` attributes the Web SDK observes for view/click tracking.
+   * Spread these onto the component's root element. A component that forgets to
+   * is invisible to Insights — scripts/smoke.tsx asserts every mapped type
+   * emits `data-ctfl-entry-id`.
+   */
+  trackingAttributes?: Record<string, string>;
 };
 
 /** The Contentful SDK constrains `include` to 0..10. */
 export type IncludeDepth = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
-/** Hono environment. `preview` is resolved once per request by middleware. */
+/** Hono environment. Both values are resolved once per request by middleware. */
 export type AppEnv = {
   Variables: {
     /** True when this request should read from the Preview API instead of Delivery. */
     preview: boolean;
+    /**
+     * Request-bound Optimization client. Undefined on draft renders (editors get
+     * baseline) and when personalization is unconfigured.
+     */
+    optimization: CoreStatelessRequest | undefined;
+    /** The CMP decision for this request, read once from the consent cookie. */
+    consent: ConsentDecision;
   };
 };

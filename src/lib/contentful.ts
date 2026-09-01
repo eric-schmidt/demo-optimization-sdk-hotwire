@@ -43,6 +43,33 @@ const toPlainJson = <T>(value: unknown): T =>
  * A tag-based cache implementation is parked in backup/with-cache/ if this demo
  * ever needs one again.
  */
+/**
+ * Audiences and experiences for the preview panel.
+ *
+ * Unlike getEntriesBySlug this keeps the whole EntryCollection rather than just
+ * `items`: the panel reads `experiences.includes.Entry` to show variant names, and
+ * discarding `includes` would leave every variant unlabelled.
+ *
+ * Read through the Preview API because this is an authoring tool and unpublished
+ * audiences should be visible.
+ */
+export const getPersonalizationEntries = async (): Promise<{
+  audiences: unknown;
+  experiences: unknown;
+}> => {
+  const client = getClient({ preview: true });
+
+  const [audiences, experiences] = await Promise.all([
+    client.getEntries({ content_type: "nt_audience", include: 1, limit: 200 }),
+    client.getEntries({ content_type: "nt_experience", include: 2, limit: 200 }),
+  ]);
+
+  return {
+    audiences: toPlainJson(audiences),
+    experiences: toPlainJson(experiences),
+  };
+};
+
 export const getEntriesBySlug = async ({
   preview = false,
   contentType,

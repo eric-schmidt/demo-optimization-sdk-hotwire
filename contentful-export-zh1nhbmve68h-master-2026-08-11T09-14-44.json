@@ -49,7 +49,7 @@
         "urn": "crn:contentful:::content:spaces/zh1nhbmve68h/environments/master/content_types/landingPage"
       },
       "displayField": "adminTitle",
-      "name": "📄 Landing Page",
+      "name": "\ud83d\udcc4 Landing Page",
       "description": "",
       "fields": [
         {
@@ -58,8 +58,7 @@
           "type": "Symbol",
           "localized": false,
           "required": true,
-          "validations": [
-          ],
+          "validations": [],
           "disabled": false,
           "omitted": false
         },
@@ -100,8 +99,7 @@
           "type": "Array",
           "localized": false,
           "required": false,
-          "validations": [
-          ],
+          "validations": [],
           "disabled": false,
           "omitted": false,
           "items": {
@@ -167,7 +165,7 @@
         "urn": "crn:contentful:::content:spaces/zh1nhbmve68h/environments/master/content_types/hero"
       },
       "displayField": "adminTitle",
-      "name": "🧩 Hero",
+      "name": "\ud83e\udde9 Hero",
       "description": "",
       "fields": [
         {
@@ -176,8 +174,7 @@
           "type": "Symbol",
           "localized": false,
           "required": true,
-          "validations": [
-          ],
+          "validations": [],
           "disabled": false,
           "omitted": false
         },
@@ -187,8 +184,7 @@
           "type": "Symbol",
           "localized": false,
           "required": true,
-          "validations": [
-          ],
+          "validations": [],
           "disabled": false,
           "omitted": false
         },
@@ -198,8 +194,7 @@
           "type": "Text",
           "localized": false,
           "required": false,
-          "validations": [
-          ],
+          "validations": [],
           "disabled": false,
           "omitted": false
         },
@@ -271,7 +266,7 @@
         "urn": "crn:contentful:::content:spaces/zh1nhbmve68h/environments/master/content_types/mediaWrapper"
       },
       "displayField": "adminTitle",
-      "name": "📸 Media Wrapper",
+      "name": "\ud83d\udcf8 Media Wrapper",
       "description": "",
       "fields": [
         {
@@ -280,8 +275,7 @@
           "type": "Symbol",
           "localized": false,
           "required": true,
-          "validations": [
-          ],
+          "validations": [],
           "disabled": false,
           "omitted": false
         },
@@ -291,8 +285,7 @@
           "type": "Link",
           "localized": false,
           "required": true,
-          "validations": [
-          ],
+          "validations": [],
           "disabled": false,
           "omitted": false,
           "linkType": "Asset"
@@ -303,8 +296,7 @@
           "type": "Symbol",
           "localized": false,
           "required": true,
-          "validations": [
-          ],
+          "validations": [],
           "disabled": false,
           "omitted": false
         }
@@ -359,7 +351,7 @@
         "urn": "crn:contentful:::content:spaces/zh1nhbmve68h/environments/master/content_types/duplex"
       },
       "displayField": "adminTitle",
-      "name": "🧩 Duplex",
+      "name": "\ud83e\udde9 Duplex",
       "description": "",
       "fields": [
         {
@@ -368,8 +360,7 @@
           "type": "Symbol",
           "localized": false,
           "required": true,
-          "validations": [
-          ],
+          "validations": [],
           "disabled": false,
           "omitted": false
         },
@@ -379,8 +370,7 @@
           "type": "Symbol",
           "localized": false,
           "required": true,
-          "validations": [
-          ],
+          "validations": [],
           "disabled": false,
           "omitted": false
         },
@@ -390,8 +380,7 @@
           "type": "Text",
           "localized": false,
           "required": false,
-          "validations": [
-          ],
+          "validations": [],
           "disabled": false,
           "omitted": false
         },
@@ -415,8 +404,7 @@
       ]
     }
   ],
-  "tags": [
-  ],
+  "tags": [],
   "editorInterfaces": [
     {
       "sys": {
@@ -681,10 +669,8 @@
   "entries": [
     {
       "metadata": {
-        "tags": [
-        ],
-        "concepts": [
-        ]
+        "tags": [],
+        "concepts": []
       },
       "sys": {
         "space": {
@@ -736,8 +722,7 @@
             "en-US": "published"
           }
         },
-        "automationTags": [
-        ],
+        "automationTags": [],
         "contentType": {
           "sys": {
             "type": "Link",
@@ -778,10 +763,8 @@
     },
     {
       "metadata": {
-        "tags": [
-        ],
-        "concepts": [
-        ]
+        "tags": [],
+        "concepts": []
       },
       "sys": {
         "space": {
@@ -833,8 +816,7 @@
             "en-US": "published"
           }
         },
-        "automationTags": [
-        ],
+        "automationTags": [],
         "contentType": {
           "sys": {
             "type": "Link",
@@ -867,10 +849,8 @@
     },
     {
       "metadata": {
-        "tags": [
-        ],
-        "concepts": [
-        ]
+        "tags": [],
+        "concepts": []
       },
       "sys": {
         "space": {
@@ -922,8 +902,7 @@
             "en-US": "published"
           }
         },
-        "automationTags": [
-        ],
+        "automationTags": [],
         "contentType": {
           "sys": {
             "type": "Link",
@@ -953,10 +932,8 @@
     },
     {
       "metadata": {
-        "tags": [
-        ],
-        "concepts": [
-        ]
+        "tags": [],
+        "concepts": []
       },
       "sys": {
         "space": {
@@ -1008,8 +985,7 @@
             "en-US": "published"
           }
         },
-        "automationTags": [
-        ],
+        "automationTags": [],
         "contentType": {
           "sys": {
             "type": "Link",
@@ -1042,10 +1018,8 @@
     },
     {
       "metadata": {
-        "tags": [
-        ],
-        "concepts": [
-        ]
+        "tags": [],
+        "concepts": []
       },
       "sys": {
         "space": {
@@ -1097,8 +1071,7 @@
             "en-US": "published"
           }
         },
-        "automationTags": [
-        ],
+        "automationTags": [],
         "contentType": {
           "sys": {
             "type": "Link",
@@ -1130,10 +1103,8 @@
   "assets": [
     {
       "metadata": {
-        "tags": [
-        ],
-        "concepts": [
-        ]
+        "tags": [],
+        "concepts": []
       },
       "sys": {
         "space": {
@@ -1212,10 +1183,8 @@
     },
     {
       "metadata": {
-        "tags": [
-        ],
-        "concepts": [
-        ]
+        "tags": [],
+        "concepts": []
       },
       "sys": {
         "space": {
@@ -1342,7 +1311,7 @@
   "webhooks": [
     {
       "name": "Next.js Revalidation (localhost / ngrok)",
-      "url": "https://kit-singular-subtly.ngrok-free.app/api/revalidate?secret=K7sD9p3RvM2wN1zL5tX0qG6c",
+      "url": "https://kit-singular-subtly.ngrok-free.app/api/revalidate?secret=REDACTED",
       "httpBasicUsername": null,
       "topics": [
         "Entry.create",
@@ -1352,8 +1321,7 @@
         "Entry.unpublish",
         "Entry.delete"
       ],
-      "headers": [
-      ],
+      "headers": [],
       "active": true,
       "sys": {
         "type": "WebhookDefinition",
@@ -1503,16 +1471,11 @@
         "ContentModel": [
           "read"
         ],
-        "Settings": [
-        ],
-        "ContentDelivery": [
-        ],
-        "Environments": [
-        ],
-        "EnvironmentAliases": [
-        ],
-        "Tags": [
-        ]
+        "Settings": [],
+        "ContentDelivery": [],
+        "Environments": [],
+        "EnvironmentAliases": [],
+        "Tags": []
       },
       "sys": {
         "type": "Role",
@@ -1584,16 +1547,11 @@
         "ContentModel": [
           "read"
         ],
-        "Settings": [
-        ],
-        "ContentDelivery": [
-        ],
-        "Environments": [
-        ],
-        "EnvironmentAliases": [
-        ],
-        "Tags": [
-        ]
+        "Settings": [],
+        "ContentDelivery": [],
+        "Environments": [],
+        "EnvironmentAliases": [],
+        "Tags": []
       },
       "sys": {
         "type": "Role",
@@ -1771,16 +1729,11 @@
         "ContentModel": [
           "read"
         ],
-        "Settings": [
-        ],
-        "ContentDelivery": [
-        ],
-        "Environments": [
-        ],
-        "EnvironmentAliases": [
-        ],
-        "Tags": [
-        ]
+        "Settings": [],
+        "ContentDelivery": [],
+        "Environments": [],
+        "EnvironmentAliases": [],
+        "Tags": []
       },
       "sys": {
         "type": "Role",
@@ -2026,16 +1979,11 @@
         "ContentModel": [
           "read"
         ],
-        "Settings": [
-        ],
-        "ContentDelivery": [
-        ],
-        "Environments": [
-        ],
-        "EnvironmentAliases": [
-        ],
-        "Tags": [
-        ]
+        "Settings": [],
+        "ContentDelivery": [],
+        "Environments": [],
+        "EnvironmentAliases": [],
+        "Tags": []
       },
       "sys": {
         "type": "Role",
@@ -2371,16 +2319,11 @@
         "ContentModel": [
           "read"
         ],
-        "Settings": [
-        ],
-        "ContentDelivery": [
-        ],
-        "Environments": [
-        ],
-        "EnvironmentAliases": [
-        ],
-        "Tags": [
-        ]
+        "Settings": [],
+        "ContentDelivery": [],
+        "Environments": [],
+        "EnvironmentAliases": [],
+        "Tags": []
       },
       "sys": {
         "type": "Role",
@@ -2506,16 +2449,11 @@
         "ContentModel": [
           "read"
         ],
-        "Settings": [
-        ],
-        "ContentDelivery": [
-        ],
-        "Environments": [
-        ],
-        "EnvironmentAliases": [
-        ],
-        "Tags": [
-        ]
+        "Settings": [],
+        "ContentDelivery": [],
+        "Environments": [],
+        "EnvironmentAliases": [],
+        "Tags": []
       },
       "sys": {
         "type": "Role",

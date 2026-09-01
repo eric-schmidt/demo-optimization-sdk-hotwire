@@ -3,8 +3,10 @@ import { BlockList } from "../components/ComponentResolver";
 import { PAGE_BLOCKS_ID } from "../views/Layout";
 import { blocksFromPages } from "../lib/blocks";
 import { getEntriesBySlug } from "../lib/contentful";
+import { resolveBlocks } from "../lib/optimization-render";
 import { disablePreview, enablePreview, secretsMatch } from "../lib/preview";
 import type { AppEnv, LandingPage } from "../lib/types";
+import type { SelectedOptimizationArray } from "@contentful/optimization-node/core-sdk";
 
 // The `preview` resource. In Rails terms this is a PreviewsController with
 // create / destroy plus one member action, routed as a singular resource:
@@ -90,6 +92,36 @@ const renderNode = async (node: unknown): Promise<string> => {
 };
 
 /**
+ * The body this endpoint accepts.
+ *
+ * The object form carries the full authoring state — the patched entry graph AND
+ * the currently forced audience — so a field edit cannot drop a panel override and
+ * vice versa. The bare-array/object form is the original contract and still works.
+ */
+type RenderPayload =
+  | LandingPage
+  | LandingPage[]
+  | {
+      pages: LandingPage | LandingPage[];
+      selectedOptimizations?: SelectedOptimizationArray;
+    };
+
+const normalisePayload = (payload: RenderPayload) => {
+  if (payload && !Array.isArray(payload) && "pages" in payload) {
+    const { pages, selectedOptimizations } = payload;
+    return {
+      pages: Array.isArray(pages) ? pages : [pages],
+      selectedOptimizations,
+    };
+  }
+
+  return {
+    pages: Array.isArray(payload) ? payload : [payload],
+    selectedOptimizations: undefined,
+  };
+};
+
+/**
  * Re-render the blocks from a patched entry graph and reply with a Turbo Stream.
  *
  * This is the piece with no Next.js counterpart, because useContentfulLiveUpdates
@@ -105,20 +137,27 @@ const renderNode = async (node: unknown): Promise<string> => {
  */
 previewRoutes.post("/preview/render", async (c) => {
   // This endpoint renders caller-supplied JSON into HTML, so it must never be
-  // reachable outside preview mode.
+  // reachable outside preview mode. The same gate now also covers caller-supplied
+  // selections, which are strictly less powerful than the entry graph it already
+  // accepted: a selection can only pick among variants already present in the
+  // posted graph. No Experience API write, no server-side fetch, no id the caller
+  // did not already send.
   if (!c.get("preview")) {
     return c.text("Preview mode required", 403);
   }
 
-  let payload: LandingPage | LandingPage[];
+  let payload: RenderPayload;
   try {
-    payload = await c.req.json<LandingPage | LandingPage[]>();
+    payload = await c.req.json<RenderPayload>();
   } catch {
     return c.text("Invalid JSON body", 400);
   }
 
-  const pages = Array.isArray(payload) ? payload : [payload];
-  const blocks = blocksFromPages(pages);
+  const { pages, selectedOptimizations } = normalisePayload(payload);
+  // Resolution is local and pure, so this endpoint still makes ZERO Contentful
+  // requests: the posted graph already contains every variant. That matters —
+  // re-fetching per keystroke would run straight into the 14 req/s CPA limit.
+  const blocks = resolveBlocks(blocksFromPages(pages), selectedOptimizations);
   const html = await renderNode(BlockList({ blocks }));
 
   // One `update` on the container rather than a `replace` per block: `update`

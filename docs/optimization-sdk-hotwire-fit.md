@@ -1,6 +1,34 @@
 # Contentful Personalization on Hotwire: SDK fit assessment
 
-**Status:** Assessment only — 2026-08-25. **No personalization code exists in this repository.**
+**Status: implemented 2026-08-25 — superseded in part.** The opening claim below is no longer true.
+See [`adr/0004-optimization-sdk-integration.md`](./adr/0004-optimization-sdk-integration.md) for what
+was actually built.
+
+§1, §2 and §5's division-of-labour argument held up under implementation: the Node + Web split is the
+right shape, and server-side selection genuinely needs no reactivity. **§3's code sketches and §4.3
+did not** — the sketches do not match the 1.x API, and §4.3 is wrong in both of its bullets. They are
+left in place with inline `> **Corrected:**` callouts rather than rewritten, because a wrong answer
+that has already been proposed once tends to get proposed again.
+
+Three things this assessment missed:
+
+1. **Every audience in space `zh1nhbmve68h` targets the `habitat` query parameter** via
+   `context_page_query`. So `eventContext.page` is load-bearing, and omitting the query string is a
+   silent all-baseline failure with no error to point at. This is the highest-risk detail in the
+   integration and it is not mentioned anywhere below.
+2. **The preview panel is browser-only** and works by making the *browser* SDK re-resolve entries.
+   There is no forced-audience option on `forRequest()` at all, so on a server-rendered page the panel
+   changes state and nothing else. Audience simulation required a panel → Turbo Stream bridge that
+   this document does not anticipate — the largest genuinely new piece of work.
+3. **`include: 4` is one level from breaking** (§4 of the ADR). Unresolved links resolve to baseline
+   silently, so a personalized hero would have rendered variant text with no image and no error.
+
+Two things it worried about that turned out fine: `toPlainJson` preserves the whole experience graph
+with no circular truncation, and the Web SDK re-observes the DOM itself.
+
+---
+
+**Original status:** Assessment only — 2026-08-25. **No personalization code exists in this repository.**
 
 Written for the Allegiant Air / Apply Digital personalization implementation review. It answers
 one question: given a Hotwire frontend on Node + TypeScript, which Optimization SDK packages
@@ -64,6 +92,11 @@ GET /:slug ──► page.ts ─┤
                client/index.ts ──► tracking controller (NEW) ── optimization-web
 ```
 
+> **Corrected:** this sketch does not match the 1.x API. `profileId:` is `profile: { id }`; `url:` is
+> `eventContext.page`, which the SDK does *not* derive from a framework request; `consent` is
+> **required**, not optional; and `forRequest()` alone emits nothing — `page()` is what returns
+> selections. Use the SDK's own `createPageContextFromUrl`, and see `src/lib/optimization.ts`.
+
 **(a) A Hono middleware** creating the request-scoped instance:
 
 ```ts
@@ -80,6 +113,13 @@ app.use(async (c, next) => {
   await next();
 });
 ```
+
+> **Corrected:** there is no entry-id-keyed `selectedOptimizations` map — selections are keyed by
+> `experienceId`. The real call is `optimization.resolveOptimizedEntry(baselineEntry, selections)`.
+> The `selected?.fields ?? entry.fields` shape below also encodes an anti-pattern: a CONTROL assignment
+> returns the *baseline* entry with a defined `selectedOptimization` at `variantIndex: 0`, so inferring
+> "no match" from identity loses the control arm of any experiment. Resolution also moved out of the
+> component into `src/lib/optimization-render.ts`; see ADR 0004.
 
 **(b) `ComponentResolver`** picks the selected variant instead of the baseline. This is the one
 place rendering has to change, and it stays a single seam because the resolver is already the
@@ -112,6 +152,13 @@ hazard for whenever it comes back — and it must come back *audience-aware*, no
 The parked implementation caches one thing per slug; personalization breaks that, because the
 response now varies by audience.
 
+> **Note:** caching remains **off**, and no permutation caching was built. When it returns, prefer the
+> first-party helpers — `createOptimizationCacheKey`, `createPublicPermutationCacheMetadata`, and
+> `assertOptimizationCacheSafety` (which throws on publicly caching profile-bearing output) — over
+> hand-rolled `Vary`. And note the audience dimension for this space is the **query string**, not just
+> the slug, because audiences key on `habitat`. `backup/with-cache/` also would not restore cleanly: it
+> imports `../lib/draft` and `./routes/draft`, which no longer exist.
+
 Two scopes are needed, and they must not be conflated:
 
 | Scope | What it caches | Key |
@@ -128,6 +175,23 @@ becomes unsafe the moment personalization is added**. Restoring the cache and ad
 personalization must happen as one change, not two.
 
 ### 4.3 Turbo Drive breaks naive page tracking
+
+> **Corrected — this section is wrong in both directions, and it is the most consequential error here.**
+>
+> **On page events:** the premise holds only for a *client-emitting* design. In this app a Turbo Drive
+> visit **is a server request**, so the server emits a page event for every navigation. Adding a
+> `turbo:load` emitter would **double-count every navigation** — not fix under-counting — and
+> over-counting silently corrupts experiment results where under-counting is at least visible. The
+> browser uses `trackCurrentPage({ initialPageEvent: "skip" })` unconditionally.
+>
+> **On observation:** the Web SDK installs its own document-wide `MutationObserver` filtered on
+> `data-ctfl-entry-id`, so Turbo body swaps and Turbo Stream morphs need no re-binding. A Stimulus
+> controller that tore observation down in `disconnect()` would **disable** tracking after the first
+> navigation. The tracking controller's `disconnect()` is deliberately empty.
+>
+> What *is* true: `connect()` is the right hook — but because Turbo replaces `<body>` and the
+> controller reconnects, not because of `turbo:load`. And `turbo-cache-control: no-cache` on
+> personalized responses was necessary, as suspected.
 
 This is the Hotwire-specific issue, and the one most likely to be missed.
 
@@ -167,6 +231,12 @@ happens to match.
 
 ## 5. What is genuinely custom work
 
+> **Corrected:** "Re-binding observation after Turbo swaps" belongs in the **SDK** column, not the app's
+> (§4.3 above). Three app-owned concerns are missing from the table: assembling the page context
+> *including the query string*, the preview-panel → server re-render bridge, and timeout configuration
+> — the SDK provides the knob, but its default of 3000 ms × 2 attempts is unsafe inside a
+> server-rendered request.
+
 Apply Digital were previously told the React path is the happy path and that a non-React
 implementation means reimplementing the reactivity the React SDK abstracts. With the
 Optimization SDK's Node package that story improves substantially, because server-side variant
@@ -187,6 +257,12 @@ selection needs no reactivity at all. What remains theirs to own:
 
 Extend this repo rather than starting a new one: it already has the render seam, the request
 context, and the cache abstraction the integration needs. Suggested order —
+
+> **Corrected:** step 1 was already done before this was written. The repo's
+> `contentful-export-*.json` is stale — it predates `nt_audience` / `nt_experience` / `nt_mergetag` and
+> the `nt_experiences` fields on **both** `hero` and `duplex` — so README setup step 7 will not
+> reproduce this demo in a fresh space. Also note `optimizationContextId` is absent from all
+> server-rendered tracking attributes: it is stateful-only by design, not a missing feature.
 
 1. Configure an experience with two variants on the `hero` content type in space `zh1nhbmve68h`.
 2. Add the middleware and the `ComponentResolver` variant swap. Confirm the variant renders in
