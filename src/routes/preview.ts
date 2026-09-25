@@ -5,6 +5,7 @@ import { blocksFromPages } from "../lib/blocks";
 import { getEntriesBySlug } from "../lib/contentful";
 import { resolveBlocks } from "../lib/optimization-render";
 import { disablePreview, enablePreview, secretsMatch } from "../lib/preview";
+import { describeTimelineFailure, timelineFromToken } from "../lib/timeline";
 import type { AppEnv, LandingPage } from "../lib/types";
 import type { SelectedOptimizationArray } from "@contentful/optimization-node/core-sdk";
 
@@ -44,6 +45,11 @@ previewRoutes.get("/preview", async (c) => {
   const secret = c.req.query("secret");
   const type = c.req.query("type") ?? "landingPage";
   const slug = c.req.query("slug");
+  // Populated by the web app when an editor has a release selected in the timeline
+  // selector, empty when they are viewing current content. It reaches us because
+  // the space's Content Preview URL carries `&timeline={timeline}` — a setting that
+  // lives outside this repository, so no code review can catch its absence.
+  const timeline = timelineFromToken(c.req.query("timeline"));
 
   // This secret should only be known to this route handler and the CMS.
   const expected = process.env.CONTENTFUL_PREVIEW_SECRET;
@@ -55,7 +61,25 @@ previewRoutes.get("/preview", async (c) => {
     return c.text("Invalid type", 400);
   }
 
-  const entries = await getEntriesBySlug({ preview: true, contentType: type, slug });
+  // Scoped to the release, because a release can INTRODUCE a page: its slug does
+  // not exist in current content, and an un-scoped check here would 401 a
+  // perfectly good preview link.
+  //
+  // The retry is the other half of that. A stale, deleted, or non-Timeline release
+  // id makes the Preview API answer 404 rather than falling back, and a link
+  // someone shared last week should still open — degraded, which the page itself
+  // then says out loud. Only the release scope is retried; a genuine outage still
+  // surfaces from the second call.
+  let entries;
+  try {
+    entries = await getEntriesBySlug({ preview: true, contentType: type, slug, timeline });
+  } catch (error) {
+    if (!timeline) throw error;
+    console.warn(
+      `[timeline] release scope rejected while validating the slug; retrying un-scoped: ${describeTimelineFailure(error)}`,
+    );
+    entries = await getEntriesBySlug({ preview: true, contentType: type, slug });
+  }
 
   // If the slug doesn't exist prevent preview mode from being enabled.
   const target = entries[0]?.fields?.slug;
@@ -68,7 +92,15 @@ previewRoutes.get("/preview", async (c) => {
   // Redirect to the path from the fetched entry, not the slug query parameter,
   // which would be an open redirect. 302 is the conventional status for a
   // redirect following a GET.
-  return c.redirect(`/${target}`, 302);
+  //
+  // The redirect drops every other query parameter, so the timeline token has to be
+  // carried forward explicitly or the release scope is lost between the handshake
+  // and the render. Forward the raw token rather than rebuilding it: the token has
+  // already been validated by `timelineFromToken`, and it survives the trip
+  // byte-identical, where `buildTimelinePreviewToken` would append a trailing `;`
+  // to a release-only scope. Encoded because the token's separator is `;`.
+  const query = timeline ? `?timeline=${encodeURIComponent(timeline.token)}` : "";
+  return c.redirect(`/${target}${query}`, 302);
 });
 
 /**

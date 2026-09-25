@@ -39,6 +39,20 @@ type PersonalizationProps = {
   handoff?: unknown;
 };
 
+/**
+ * The release scope a draft render resolved, present on every draft render —
+ * including when no release is active, which is the state the banner exists to
+ * make visible. See `TimelineBanner`.
+ */
+type TimelineProps = {
+  /** Release id, absent when the editor is viewing current content. */
+  releaseId?: string;
+  /** ISO timestamp, only when the token carried one. */
+  timestamp?: string;
+  /** True when a release scope was asked for and the Preview API rejected it. */
+  degraded: boolean;
+};
+
 type LayoutProps = {
   children?: Child;
   /** When true, mount the Live Preview controller and load its bundle. */
@@ -50,6 +64,50 @@ type LayoutProps = {
    */
   livePreviewData?: unknown;
   personalization?: PersonalizationProps;
+  /** Release scope for this draft render. Never set on a published render. */
+  timeline?: TimelineProps;
+};
+
+/**
+ * States which release, if any, this preview is scoped to.
+ *
+ * Shown on EVERY draft render, including the "current content" case, and that is
+ * the whole point rather than decoration. Timeline resolution is documented to
+ * fall back — requested release, then the previous scheduled release, then
+ * currently published content — so a page that renders is not evidence the
+ * preview resolved the release that was asked for. The failure mode is a page
+ * that looks correct, and naming the active scope on screen is what turns an
+ * invisible misconfiguration into something an editor can report.
+ *
+ * The release id, not its title: resolving a title needs the CMA, and this app
+ * ships no management credential.
+ */
+const TimelineBanner = ({ releaseId, timestamp, degraded }: TimelineProps) => {
+  const base =
+    "fixed bottom-4 left-4 z-50 rounded-md px-3 py-2 text-xs font-medium shadow-lg";
+
+  if (degraded) {
+    return (
+      <div class={`${base} bg-amber-100 text-amber-900 ring-1 ring-amber-400`}>
+        Release not found &mdash; showing current preview content
+      </div>
+    );
+  }
+
+  if (!releaseId) {
+    return (
+      <div class={`${base} bg-white/90 text-neutral-600 ring-1 ring-neutral-300`}>
+        Timeline: current content
+      </div>
+    );
+  }
+
+  return (
+    <div class={`${base} bg-white/90 text-neutral-900 ring-1 ring-neutral-300`}>
+      Timeline: release <code class="font-mono">{releaseId}</code>
+      {timestamp ? <span class="text-neutral-500"> as of {timestamp}</span> : null}
+    </div>
+  );
 };
 
 /**
@@ -67,6 +125,7 @@ export const Layout = ({
   draft = false,
   livePreviewData,
   personalization,
+  timeline,
 }: LayoutProps) => (
   <html lang="en">
     <head>
@@ -198,6 +257,13 @@ export const Layout = ({
           <DemoControls consent={personalization.consent} />
         )}
       </main>
+
+      {/*
+        Bottom LEFT, mirroring the Exit-preview form on the right so the two fixed
+        preview affordances cannot collide. DemoControls also sits bottom-left, but
+        renders only on PUBLISHED pages, where this never does.
+      */}
+      {draft && timeline && <TimelineBanner {...timeline} />}
 
       {/*
         Leaving preview mode is a state change, so it is a real form and submit

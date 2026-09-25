@@ -6,6 +6,7 @@ import { Layout } from "../views/Layout";
 import { NotFound } from "../views/NotFound";
 import { blocksFromPages } from "../lib/blocks";
 import { getEntriesBySlug } from "../lib/contentful";
+import { describeTimelineFailure } from "../lib/timeline";
 import {
   demoControlsEnabled,
   emitPageEvent,
@@ -46,10 +47,12 @@ const INCLUDE_DEPTH = 10;
 
 pageRoutes.get("/:slug", async (c) => {
   const slug = c.req.param("slug");
-  // Both resolved once per request by the middleware in server.ts.
+  // All resolved once per request by the middleware in server.ts.
   const preview = c.get("preview");
   const requestOptimization = c.get("optimization");
   const consent = c.get("consent");
+  // Only ever set on a draft request — Timeline is Preview-API-only.
+  const timeline = c.get("timeline");
 
   // Concurrent on purpose: the content fetch and the Experience API call do not
   // depend on each other, so serialising them would add the round trip straight
@@ -64,6 +67,9 @@ pageRoutes.get("/:slug", async (c) => {
       contentType: "landingPage",
       slug,
       includeDepth: INCLUDE_DEPTH,
+      // Undefined on every published render, so this is the same call it always
+      // was outside preview mode.
+      timeline,
     }),
     // Don't ask for what consent does not permit. The SDK would refuse the event
     // anyway (allowedEventTypes is []), but declining to call it keeps a routine
@@ -72,9 +78,33 @@ pageRoutes.get("/:slug", async (c) => {
     consent.events ? emitPageEvent(requestOptimization) : Promise.resolve(undefined),
   ]);
 
-  // A Contentful failure is still a 500, exactly as before personalization.
-  if (contentResult.status === "rejected") throw contentResult.reason;
-  const landingPages = contentResult.value;
+  // A Contentful failure is still a 500, exactly as before personalization — with
+  // one exception.
+  //
+  // A stale, deleted, or non-Timeline release id is a LOUD failure: the Preview API
+  // answers 404 for the release rather than falling back to published content. A
+  // preview link shared last week should not become a broken page, so drop the
+  // release scope, re-fetch current preview content, and have the page say so. This
+  // is the only failure Timeline surfaces as an error; every other way it can be
+  // wrong looks like success, which is what the banner below exists for.
+  let landingPages;
+  let timelineDegraded = false;
+  if (contentResult.status === "fulfilled") {
+    landingPages = contentResult.value;
+  } else if (timeline) {
+    console.warn(
+      `[timeline] release scope rejected; falling back to un-scoped preview content: ${describeTimelineFailure(contentResult.reason)}`,
+    );
+    timelineDegraded = true;
+    landingPages = await getEntriesBySlug({
+      preview,
+      contentType: "landingPage",
+      slug,
+      includeDepth: INCLUDE_DEPTH,
+    });
+  } else {
+    throw contentResult.reason;
+  }
 
   if (landingPages.length === 0) {
     return c.html(Layout({ children: NotFound() }) as never, 404);
@@ -110,6 +140,18 @@ pageRoutes.get("/:slug", async (c) => {
     Layout({
       draft: preview,
       livePreviewData: preview ? landingPages : undefined,
+      // Draft renders always state their release scope, including "current
+      // content". Timeline is documented to fall back silently — requested release
+      // -> previous scheduled release -> published — so a page that renders is not
+      // evidence the preview resolved what was asked for. Naming the active scope
+      // is the only thing that makes a silent fallback reportable.
+      timeline: preview
+        ? {
+            releaseId: timeline?.releaseId,
+            timestamp: timeline?.timestamp,
+            degraded: timelineDegraded,
+          }
+        : undefined,
       // Absent on draft renders: no page event was emitted, so there is no
       // state to hand off and no tracking to do.
       personalization: optimizationClientId

@@ -9,6 +9,7 @@
 //   - field values are HTML-escaped, and embedded JSON cannot break out of <script>
 //   - variant selection picks the variant, controls still track, and every failure
 //     path lands on baseline (ADR 0004)
+//   - draft renders always state their Timeline scope, and published renders never do
 //
 // Cache assertions used to live here too; they moved with the code into
 // backup/with-cache/scripts/smoke.tsx.
@@ -349,6 +350,49 @@ console.log("\n--- JSON breakout ---");
 const evil = await render(Layout({ draft: true, livePreviewData: { s: "</script><script>bad()</script>" }, children: null }));
 check("no </script> breakout", !evil.includes("</script><script>bad()"));
 check("escaped as \\u003c", evil.includes("\\u003c/script"));
+
+// ---------------------------------------------------------------------------
+// Timeline scope banner
+//
+// The banner is the only thing that makes a Timeline misconfiguration visible:
+// resolution falls back silently (requested release -> previous scheduled release
+// -> published), so a rendered page proves nothing about which scope answered.
+// These are pure Layout assertions, so they need no credentials and no release.
+// ---------------------------------------------------------------------------
+console.log("\n--- timeline banner ---");
+
+const timelineRender = (timeline?: {
+  releaseId?: string;
+  timestamp?: string;
+  degraded: boolean;
+}) => render(Layout({ draft: true, timeline, children: null }));
+
+const noRelease = await timelineRender({ degraded: false });
+check("current content is stated, not implied", noRelease.includes("current content"));
+
+const scoped = await timelineRender({ releaseId: "6Xy2release", degraded: false });
+check("names the release id", scoped.includes("6Xy2release"));
+check("no bogus timestamp", !scoped.includes("as of"));
+
+const stamped = await timelineRender({
+  releaseId: "6Xy2release",
+  timestamp: "2026-09-10T00:00:00Z",
+  degraded: false,
+});
+check("shows the timestamp when the token carried one", stamped.includes("as of"));
+
+const degraded = await timelineRender({ releaseId: "deadbeef", degraded: true });
+check("degradation is announced", degraded.includes("Release not found"));
+check("degraded render does not claim a scope", !degraded.includes("deadbeef"));
+
+// Timeline is a Preview API feature; a published render must never show a banner,
+// which is also the proof that no release config could have reached a Delivery
+// client (where the SDK throws rather than degrading).
+check(
+  "published render has no timeline banner",
+  !published.includes("Timeline:") && !published.includes("Release not found"),
+);
+check("draft render without a scope shows no banner", !draft.includes("Timeline:"));
 
 // ---------------------------------------------------------------------------
 // Preview bridge (browser logic, stubbed DOM)

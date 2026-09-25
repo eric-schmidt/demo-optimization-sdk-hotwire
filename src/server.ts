@@ -8,6 +8,7 @@ import { isPreviewRequest } from "./lib/preview";
 import { forRequestFromContext, personalizationEnabled } from "./lib/optimization";
 import { readProfileId } from "./lib/profile-cookie";
 import { readConsent } from "./lib/consent";
+import { timelineFromToken } from "./lib/timeline";
 import { optimizationRoutes } from "./routes/optimization";
 import { Layout } from "./views/Layout";
 import { NotFound } from "./views/NotFound";
@@ -42,6 +43,11 @@ app.use("*", async (c, next) => {
     "optimization",
     preview ? undefined : forRequestFromContext(c, readProfileId(c), consent),
   );
+  // Timeline is the mirror image: resolved only on PREVIEW requests, because it is
+  // a Preview API feature and the SDK throws rather than degrading if a release
+  // config reaches a Delivery client. A `timeline` parameter on a published URL is
+  // therefore ignored, not honoured.
+  c.set("timeline", preview ? timelineFromToken(c.req.query("timeline")) : undefined);
   await next();
 });
 

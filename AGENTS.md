@@ -8,6 +8,8 @@ app does; this file covers **what will bite you**.
 1. `README.md` §"What this demonstrates" and §"Where things live".
 2. `docs/adr/0004-optimization-sdk-integration.md` — the personalization design of record, every
    rejected alternative, and a deferred-work section with triggers.
+   `docs/adr/0005-timeline-preview.md` — the Timeline design of record, and why a non-React stack
+   needed no special treatment for it.
 3. `docs/plans/2026-08-25-nextjs-to-hotwire-port.md` §8 — load-bearing details that must not drift.
 4. `docs/optimization-sdk-hotwire-fit.md` — the original desk assessment. **Superseded in part** and
    annotated with inline `> **Corrected:**` callouts. Do not follow its code sketches; they predate
@@ -20,7 +22,7 @@ npm run dev        # build assets + tsx watch
 npm start          # build assets + run once
 npm run build      # build assets + typecheck
 npm run typecheck  # tsc --noEmit (strict, noUncheckedIndexedAccess, verbatimModuleSyntax)
-npm run smoke      # 90 assertions, NO credentials needed — run this first, always
+npm run smoke      # 104 assertions, NO credentials needed — run this first, always
 ```
 
 `npm run smoke` is the fastest useful signal in the repo: it renders fixtures through the real
@@ -31,7 +33,7 @@ else.**
 Server code runs through `tsx` directly — there is no server build step. Env comes from Node's own
 `--env-file-if-exists=.env.local`, so a new variable needs no code change to be picked up.
 
-## The five traps
+## The six traps
 
 These each cost real debugging time. They are ordered by how much.
 
@@ -103,6 +105,33 @@ Never infer "no match" from `resolved.entry === baselineEntry`. Dropping the con
 
 Also: `resolveOptimizedEntry` **does not clone** — never mutate its result.
 
+### 6. Timeline fails silently by design — a 200 proves nothing
+
+Timeline resolution **falls back**: requested release → previous scheduled release → currently
+published content. So a release preview that renders plausible content is *not* evidence that the
+release you asked for answered. **The only real signal is a difference from the un-scoped view.** Never
+"verify" Timeline by checking that the page rendered, or that the request returned 200 — both are true
+in every failure case except one.
+
+That one exception is worth knowing precisely, because the two failure modes are opposites:
+
+| Wrong how | What happens |
+| --- | --- |
+| Malformed / stale / deleted / non-Timeline release id | Preview API **404s** — loud. The app degrades to un-scoped preview and shows the amber banner. |
+| Valid release that changes nothing, or an unexpanded `{timeline}` in the preview URL | **Silently** resolves to current content. Looks perfect. |
+
+Three corollaries:
+
+- The scope banner (`TimelineBanner` in `views/Layout.tsx`) exists *because* of this, and shows on
+  every draft render including "current content". Do not make it conditional on a release being
+  active — that is exactly the case where a silent fallback is invisible.
+- `parseTimelinePreviewToken` is `split(';')` plus a `decodeURIComponent`. It happily returns
+  `releaseId: '{timeline}'` or `'undefined'`, and it **throws `URIError`** on a malformed percent
+  sequence. `timelineFromToken` in `lib/timeline.ts` is the guard; do not call the parser directly.
+- Before reading any code when Timeline looks broken, **check the space's Content Preview URL for
+  `&timeline={timeline}`**. That setting lives outside this repo, and its absence is indistinguishable
+  from "no release selected".
+
 ## Invariants worth protecting
 
 - **`ComponentResolver` is the single render seam.** The published page, the draft page, and every
@@ -121,6 +150,13 @@ Also: `resolveOptimizedEntry` **does not clone** — never mutate its result.
 - **Baseline is the structural default.** Unconfigured, no consent, timeout, or an Experience API
   outage all render baseline, never an empty region. Resolution is eager (outside JSX) so a failure is
   a clean 500 rather than a truncated body.
+- **A `timeline` parameter is honoured only on preview requests.** Not a style choice: the SDK's host
+  check **throws** when a release config meets a Delivery host, and it re-validates on every request.
+  So `timelinePreview` is spread only on the `preview` branch of `getClient`, and only ever with a
+  real non-empty string.
+- **The whole draft render sits on one release scope** — page content, the slug-existence check, and
+  the preview panel's audience/experience feed. A fetcher that ignores the scope mixes current and
+  future content into one page, which is the partial-staleness trap and looks like a caching bug.
 - **Caching stays off**, and `backup/with-cache/` stays parked. It also would not restore cleanly: it
   imports `../lib/draft` and `./routes/draft`, which no longer exist.
 
@@ -155,6 +191,18 @@ test on a single desert request.
   on the entry, so it is harmless.
 - Client bundles are always minified: `build:js` never receives `--dev` (nothing passes it).
 - Inspector outlines over the preview panel — see the known issue in the README.
+- `ValidationError` from `createClient` when you thought you were configuring Timeline — the host gate
+  is Preview-API-only (`preview.contentful.com`, `preview.eu.contentful.com`, or a non-`.contentful.com`
+  custom host) and it **throws** rather than ignoring the option. Passing `timelinePreview` alongside a
+  Delivery host is the cause.
+- `timelinePreview` rejected as a query parameter (*"Objects are not supported as value…"*) — it is a
+  `createClient()` option, not a `getEntries` one. The SDK rewrites its own paths to `timeline/entries`
+  and `timeline/assets`, and `getEntry` routes through the same internal call, so there is no un-scoped
+  side door to plug.
+- The Timeline banner shows an opaque release id rather than the release title — resolving a title needs
+  the CMA, and this app ships no management credential. Deliberate; see ADR 0005.
+- The space's Hotwire content preview hardcodes `slug=home` where the Next.js one uses
+  `{entry.fields.slug}`. Previewing any other `landingPage` would render `home`. Out-of-repo config.
 
 ## House style
 
