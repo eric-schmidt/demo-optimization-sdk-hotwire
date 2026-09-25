@@ -67,8 +67,21 @@ export class OptimizationPanelController extends Controller<HTMLElement> {
     // `entries` rather than a `contentful` client, deliberately: this app ships
     // zero Contentful credentials to the browser today, and handing the panel a
     // client would end that. The panel's own docs bless this path for SSR.
+    //
+    // Scoped to the same release the page was rendered from. Read off the current
+    // URL because that is where the preview handshake forwarded it, and left off
+    // entirely when absent — a `timeline=` with no value would reach the server as
+    // an empty token, which is what Contentful sends for "current content" anyway,
+    // but the shorter URL is the honest one. Un-scoped would mix CURRENT audiences
+    // and experiences into a release preview, so the panel would offer variants the
+    // page cannot render.
+    const timeline = new URLSearchParams(location.search).get("timeline");
+    const entriesUrl = timeline
+      ? `/preview/optimization-entries?timeline=${encodeURIComponent(timeline)}`
+      : "/preview/optimization-entries";
+
     try {
-      const response = await fetch("/preview/optimization-entries");
+      const response = await fetch(entriesUrl);
       if (!response.ok) {
         console.error(
           `[optimization-panel] could not load panel entries: ${response.status}`,

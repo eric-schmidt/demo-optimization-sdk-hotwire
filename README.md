@@ -1,9 +1,10 @@
 # Demo — Contentful Live Preview + Personalization on Hotwire
 
-A Contentful **Live Preview and Personalization** demo built with [Hotwire](https://hotwired.dev/) —
-Turbo and Stimulus over server-rendered HTML. It began as a one-to-one reimplementation of the Next.js
-version of this demo, rendering the same content, markup and classes, and now also does server-side
-variant selection with the Contentful Optimization SDK.
+A Contentful **Live Preview, Personalization and Timeline** demo built with
+[Hotwire](https://hotwired.dev/) — Turbo and Stimulus over server-rendered HTML. It began as a
+one-to-one reimplementation of the Next.js version of this demo, rendering the same content, markup and
+classes, and now also does server-side variant selection with the Contentful Optimization SDK and
+previews scheduled Release content with Timeline.
 
 **Stack:** Node + TypeScript, [Hono](https://hono.dev/) for routing and server-side HTML
 rendering via `hono/jsx`, Turbo Drive for navigation, Stimulus for the small amount of
@@ -11,8 +12,9 @@ remaining JS, Tailwind v4. **No React is shipped to the browser.**
 
 Why Node rather than Rails — and the rationale behind every other significant choice — is in
 [`docs/plans/2026-08-25-nextjs-to-hotwire-port.md`](./docs/plans/2026-08-25-nextjs-to-hotwire-port.md)
-(the port) and [`docs/adr/0004-optimization-sdk-integration.md`](./docs/adr/0004-optimization-sdk-integration.md)
-(personalization). Read those if you are picking this up cold. Agents should start with
+(the port), [`docs/adr/0004-optimization-sdk-integration.md`](./docs/adr/0004-optimization-sdk-integration.md)
+(personalization) and [`docs/adr/0005-timeline-preview.md`](./docs/adr/0005-timeline-preview.md)
+(Timeline). Read those if you are picking this up cold. Agents should start with
 [`AGENTS.md`](./AGENTS.md).
 
 ## What this demonstrates
@@ -24,6 +26,7 @@ no client-side swap, no flash of baseline, and only the selected variant is ever
 | Capability | Status |
 | --- | --- |
 | **Live Preview** — preview mode, inspector mode, live updates | ✅ |
+| **Timeline** — preview content as of a scheduled Release | ✅ |
 | **Variant selection** — server-side, in the initial HTML | ✅ |
 | **`page` tracking** — the event that returns the selections | ✅ |
 | **Interaction tracking** — views + clicks on `data-ctfl-*` | ✅ |
@@ -48,6 +51,27 @@ the patched entry graph back through the same server templates as a Turbo Stream
 - [`lib/preview.ts`](./src/lib/preview.ts) — `isPreviewRequest()` / `enablePreview()`, the cookie
 - [`routes/preview.ts`](./src/routes/preview.ts) — enter/leave preview, `POST /preview/render`
 - [`client/live-preview.ts`](./src/client/live-preview.ts) — `LivePreviewController`
+
+#### Timeline — previewing a scheduled Release
+
+The Contentful web app's timeline selector reloads the preview iframe with a `timeline` token
+(`releaseId;timestamp`, **empty** when the editor is on current content). `timelineFromToken()` parses and
+validates it; `getClient()` passes it to `createClient({ timelinePreview })` on the **preview branch only**,
+and the SDK rewrites its own request paths to `/timeline/entries` and `/timeline/assets`. No GraphQL
+directive and no hand-rolled REST calls — `contentful.js` is framework-agnostic, so **Hotwire needed no
+special treatment here at all**.
+
+Because the preview handshake 302s to a bare path, the token is forwarded on that redirect as a query
+parameter, and the panel's entries fetch carries it too, so the whole draft render sits on one scope.
+
+**Every draft render states its scope on screen** — including "current content". That is the feature, not
+decoration: Timeline resolution falls back silently (requested release → previous scheduled release →
+published), so a page that renders proves nothing. See [§Timeline preview](#timeline-preview).
+
+- [`lib/timeline.ts`](./src/lib/timeline.ts) — `timelineFromToken()`, and the three values that look like
+  tokens but are not
+- [`lib/contentful.ts`](./src/lib/contentful.ts) — `getClient()`, where `timelinePreview` is gated on `preview`
+- [`views/Layout.tsx`](./src/views/Layout.tsx) — `TimelineBanner`
 
 #### Variant selection — server-side
 
@@ -141,7 +165,7 @@ pre-fetched entries so no Contentful credential ever reaches the browser.
 | Four client bundles, one optimization bundle per page | Separate esbuild entry *files*, so the panel structurally cannot reach the published bundle | [`scripts/build-client.mjs`](./scripts/build-client.mjs) |
 | Baseline on outage | `requestTimeout: 700, retries: 0` + try/catch + `allSettled` + a per-block catch | [`lib/optimization.ts`](./src/lib/optimization.ts) |
 | Handoff to the browser | Server embeds profile + selections so the browser adopts them instead of re-resolving | [`views/Layout.tsx`](./src/views/Layout.tsx) |
-| Credential-free test suite | 90 assertions rendering fixtures through the real resolver | [`scripts/smoke.tsx`](./scripts/smoke.tsx) |
+| Credential-free test suite | 104 assertions rendering fixtures through the real resolver | [`scripts/smoke.tsx`](./scripts/smoke.tsx) |
 
 > **⚠️ Known issue.** Live Preview's inspector outlines are drawn by the Contentful editor in the
 > *parent* frame, over the whole iframe, so they render on top of the preview panel and no z-index in
@@ -153,7 +177,8 @@ pre-fetched entries so no Contentful credential ever reaches the browser.
 ```
 src/
   server.ts                      Hono app + the single per-request middleware
-                                 (preview flag, consent decision, optimization client)
+                                 (preview flag, consent decision, optimization
+                                 client, Timeline release scope)
   routes/
     page.ts                      GET /:slug — the whole request path
     preview.ts                   preview mode + POST /preview/render (Turbo Stream)
@@ -164,12 +189,14 @@ src/
     optimization-render.ts       PURE variant selection + data-ctfl-* attributes
     consent.ts                   reads the third-party CMP cookie
     profile-cookie.ts            ctfl-opt-aid lifecycle (app-owned by design)
+    timeline.ts                  parses/validates the timeline token (the whole trust boundary)
     blocks.ts  image.ts  preview.ts  locale.ts  types.ts
   components/
     ComponentResolver.tsx        the single render seam (entry -> component)
     ComponentMap.ts  Hero.tsx  Duplex.tsx
   views/
-    Layout.tsx                   <head>, bundles, handoff JSON, controller mounts
+    Layout.tsx                   <head>, bundles, handoff JSON, controller mounts,
+                                 the Timeline scope banner
     DemoControls.tsx  NotFound.tsx
   client/                        four esbuild entrypoints -> public/assets/
     index.ts                     app.js                  Turbo + Stimulus (every page)
@@ -178,7 +205,7 @@ src/
     live-preview.ts              live-preview.js         Live Preview SDK (DRAFT only)
     preview-render.ts            the single writer to #page-blocks (shared via window)
 scripts/
-  smoke.tsx                      90 credential-free render/logic assertions
+  smoke.tsx                      104 credential-free render/logic assertions
   build-client.mjs               the four-bundle esbuild config
 ```
 
@@ -218,11 +245,18 @@ scripts/
 8. Configure a Content Preview URL in Contentful:
 
    ```
-   https://<YOUR HTTPS HOST>/preview?secret=<CONTENTFUL_PREVIEW_SECRET>&type=landingPage&slug={entry.fields.slug}
+   https://<YOUR HTTPS HOST>/preview?secret=<CONTENTFUL_PREVIEW_SECRET>&type=landingPage&slug={entry.fields.slug}&timeline={timeline}
    ```
 
    > `type` must be `landingPage`. Note this has to be an **HTTPS** host — see
    > [Live Preview locally](#live-preview-locally) below.
+
+   > **`&timeline={timeline}` is what makes Timeline work, and its absence is invisible.** Contentful
+   > expands the placeholder to `releaseId;timestamp` when the editor has a release selected, and to an
+   > empty string on current content. Without it every preview silently renders current content and the
+   > on-screen banner will — correctly, unhelpfully — say "current content". This lives in space
+   > configuration, so no code review in this repo can catch it: check it first when Timeline looks
+   > broken.
 
 No webhook is needed. Nothing is cached, so there is nothing to invalidate.
 
@@ -268,6 +302,7 @@ there. There is no client-side rendering and no hydration.
 GET    /                 redirect to /home
 GET    /:slug            render a landingPage
 GET    /preview          enter preview mode, then redirect to the entry's slug
+                         (forwards ?timeline= so the release scope survives the redirect)
 DELETE /preview          leave preview mode
 POST   /preview/render   re-render blocks as a Turbo Stream (preview only)
 GET    /preview/optimization-entries    audiences + experiences for the preview panel
@@ -469,6 +504,74 @@ This makes **zero Contentful requests while editing**, which matters: reloading 
 instead would issue one Content Preview API request per keystroke against a 14 req/s limit.
 
 `/preview/render` renders caller-supplied JSON, so it is gated on the draft cookie.
+
+**Both work unchanged under a Timeline release**, with no app code. The editor sends `releaseId`
+alongside `isInspectorActive` and the SDK echoes it back in its tagged-field messages, so clicking an
+inspector outline on a release preview opens the **release-scoped** editor. Live updates arrive as
+`ENTRY_UPDATED` for whichever version is open, and the graph they patch came from the release-scoped
+fetch, so a keystroke morphs the blocks with the rest of the release content intact.
+
+### Timeline preview
+
+Timeline previews content **as of a scheduled Release** — an editor scrolls forward in time and sees the
+page as it will look when that release ships.
+
+Contentful drives the selection: the editor picks a release in the web app's timeline selector, and the
+preview iframe reloads with a `timeline` token in the URL. There is no release picker in this app — that
+would need a management credential to list releases, and none is shipped. The token is
+`releaseId;timestamp`, and **empty** when the editor is viewing current content.
+
+| Piece | What it does |
+| --- | --- |
+| `timelineFromToken()` in [`lib/timeline.ts`](./src/lib/timeline.ts) | Parses the token with `@contentful/timeline-preview` and rejects the three values that look like tokens but are not: `{timeline}` (unexpanded placeholder), `undefined` and `null` (stringified misses). All three otherwise reach the API and 404. |
+| Middleware in [`server.ts`](./src/server.ts) | Resolves the scope once per request — **only on preview requests**. A `timeline` parameter on a published URL is ignored, not honoured. |
+| `getClient()` in [`lib/contentful.ts`](./src/lib/contentful.ts) | Passes `timelinePreview` to `createClient()`, beside the existing `includeContentSourceMaps: preview`. |
+| `GET /preview` in [`routes/preview.ts`](./src/routes/preview.ts) | Scopes the slug-existence check (a release can *introduce* a page, whose slug does not exist in current content) and forwards the token across the 302. |
+| `TimelineBanner` in [`views/Layout.tsx`](./src/views/Layout.tsx) | States the active scope on every draft render. |
+
+#### It fails silently by design — which is what the banner is for
+
+Timeline resolution **falls back**: requested release → previous scheduled release → currently published
+content. So a preview that renders plausible content is *not* evidence that the release you selected
+answered the request. Every draft render therefore says which scope it used, bottom-left:
+
+- `Timeline: current content` — no release selected (**or** the preview URL is missing
+  `&timeline={timeline}`, which looks identical from here)
+- `Timeline: release <id>` — plus `as of <timestamp>` when the token carried one
+- amber `Release not found — showing current preview content` — the scope was rejected and dropped
+
+The banner shows the release **id**, not its title: a title needs the CMA, and this app ships no
+management credential.
+
+There is exactly one *loud* failure. A malformed, deleted, or non-Timeline release id makes the Preview
+API answer **404** rather than falling back. Rather than 500 a link someone shared last week, the app
+drops the release scope, re-fetches current preview content, logs one `[timeline]` warning, and shows the
+amber banner. The retry only fires when a scope was set, so a genuine Contentful outage still surfaces as
+an error.
+
+#### Verifying it — compare the two views, don't check for a 200
+
+Because of that fallback, the only assertion that proves anything is a **difference**:
+
+```bash
+# Enter preview once, keeping the cookie jar. Read the release id off the preview
+# iframe's URL in Contentful, with a release selected in the timeline selector.
+curl -sc jar "https://<ngrok-host>/preview?secret=$SECRET&type=landingPage&slug=home" -o /dev/null
+curl -sb jar "https://<ngrok-host>/home?timeline=<releaseId>;" | grep -o '<h1[^>]*>[^<]*'
+curl -sb jar "https://<ngrok-host>/home"                       | grep -o '<h1[^>]*>[^<]*'
+```
+
+**Pass is that the two differ.** Identical output means one of three things, none of which announce
+themselves: the preview URL lost its `timeline` parameter; the id is a Launch release rather than a
+Timeline (`Release.v2`) release; or the release contains no changed entries.
+
+Degradation is worth checking too — `?timeline=deadbeef;` must render the page **200 with the amber
+banner**, not 500, and `?timeline={timeline}` / `?timeline=undefined` must both be treated as no token at
+all. And because `timeline/assets` is a separately rewritten path, a release that swaps a hero image is
+its own check: the release's asset URL should appear, not the current one.
+
+`npm run smoke` covers the banner's four states (including that a published render never shows one), but
+it is credential-free and says nothing about release resolution — that part is manual.
 
 ### Live Preview locally
 

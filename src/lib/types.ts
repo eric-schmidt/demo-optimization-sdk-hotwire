@@ -1,5 +1,6 @@
 import type { CoreStatelessRequest } from "@contentful/optimization-node/core-sdk";
 import type { ConsentDecision } from "./consent";
+import type { TimelineScope } from "./timeline";
 
 // Shapes of the Contentful entries this demo renders.
 //
@@ -94,7 +95,7 @@ export type BlockProps = {
 /** The Contentful SDK constrains `include` to 0..10. */
 export type IncludeDepth = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 
-/** Hono environment. Both values are resolved once per request by middleware. */
+/** Hono environment. Every value is resolved once per request by middleware. */
 export type AppEnv = {
   Variables: {
     /** True when this request should read from the Preview API instead of Delivery. */
@@ -106,5 +107,13 @@ export type AppEnv = {
     optimization: CoreStatelessRequest | undefined;
     /** The CMP decision for this request, read once from the consent cookie. */
     consent: ConsentDecision;
+    /**
+     * Release scope for this request, from the `timeline` query parameter.
+     *
+     * Undefined unless a PREVIEW request carried a real token — Timeline is a
+     * Preview API feature, and the SDK throws rather than degrading if a config
+     * reaches a Delivery client, so published requests never resolve one.
+     */
+    timeline: TimelineScope | undefined;
   };
 };
